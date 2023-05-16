@@ -10,53 +10,47 @@
       padding: 20px;
     }
 
-    .post {
+    .post-list {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    .post-list li {
       background-color: #fff;
       padding: 20px;
       margin-bottom: 20px;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
 
-    .post h2 {
+    .post-list li h2 {
       margin-top: 0;
+      cursor: pointer;
     }
 
-    .post p {
-      margin-bottom: 0;
+    .post-content {
+      background-color: #fff;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
   </style>
 </head>
 <body>
-  <div id="posts">
-    <!-- Your posts will be dynamically added here -->
-  </div>
+  <ul class="post-list" id="posts">
+    <li>
+      <h2 onclick="openPost('post1.html')">Post 1</h2>
+      <p>Summary of Post 1</p>
+    </li>
+    <li>
+      <h2 onclick="openPost('post2.html')">Post 2</h2>
+      <p>Summary of Post 2</p>
+    </li>
+    <!-- Add more list items for additional posts -->
+  </ul>
 
   <script>
-    // Example of adding posts dynamically using JavaScript
-    const postsContainer = document.getElementById('posts');
-
-    // Function to add a new post
-    function addPost(title, content) {
-      const post = document.createElement('div');
-      post.classList.add('post');
-
-      const heading = document.createElement('h2');
-      heading.textContent = title;
-
-      const paragraph = document.createElement('p');
-      paragraph.textContent = content;
-
-      post.appendChild(heading);
-      post.appendChild(paragraph);
-
-      postsContainer.appendChild(post);
+    function openPost(url) {
+      window.location.href = url;
     }
-
-    // Example usage:
-    addPost("My First Post", "This is the content of my first post.");
-    addPost("Another Post", "This is another post I'm adding.");
-
-    // Feel free to add more posts using the addPost function
   </script>
 </body>
 </html>
