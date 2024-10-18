@@ -3,23 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Layout</title>
+    <title>Modern LLM Layout</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Courier New', Courier, monospace;
             margin: 0;
             padding: 0;
             display: flex;
+            background-color: #f9f9f9;
         }
 
         /* Sidebar styles */
         #sidebar {
             width: 250px;
-            background-color: #f4f4f4;
+            background-color: #2f3b52;
             padding: 15px;
-            border-right: 1px solid #ddd;
+            color: #fff;
             height: 100vh;
-            overflow-y: auto;
+            border-right: 2px solid #ccc;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+
+        #sidebar h2 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
         }
 
         #sidebar ul {
@@ -33,15 +40,39 @@
 
         #sidebar ul li a {
             text-decoration: none;
-            color: #333;
-            font-weight: bold;
-            cursor: pointer;
+            color: #ccc;
+            font-size: 1.1em;
+            transition: color 0.3s ease;
+        }
+
+        #sidebar ul li a:hover {
+            color: #fff;
         }
 
         /* Main content styles */
         #main-content {
             flex: 1;
-            padding: 20px;
+            padding: 30px;
+            background-color: #ffffff;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.05);
+        }
+
+        #main-content h2 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        #main-content p {
+            font-size: 1.1em;
+            line-height: 1.6em;
+            color: #333;
+        }
+
+        /* Default welcome message */
+        #welcome {
+            text-align: center;
+            padding: 100px 20px;
+            color: #666;
         }
 
         .article {
@@ -69,6 +100,11 @@
 
     <!-- Main content -->
     <div id="main-content">
+        <div id="welcome">
+            <h2>Welcome to the LLM Knowledge Hub</h2>
+            <p>Choose a section from the left to learn more about topics like LLM Post-training, Quantization, and more.</p>
+        </div>
+
         <div id="article1" class="article">
             <h2>LLM Post-training</h2>
             <p>Here you can write about fine-tuning and post-training processes for large language models, just like the examples shown in the image.</p>
@@ -97,6 +133,9 @@
 
     <script>
         function showArticle(articleId) {
+            // Hide welcome text
+            document.getElementById('welcome').style.display = 'none';
+
             // Hide all articles
             var articles = document.querySelectorAll('.article');
             articles.forEach(function(article) {
