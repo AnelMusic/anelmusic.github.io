@@ -3,14 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern LLM Layout</title>
+    <title>AnelMusic</title>
     <style>
         body {
-            font-family: Georgia, 'Times New Roman', serif;
+            font-family: 'Source Code Pro', 'Fira Code', Monaco, Consolas, 'Courier New', monospace;
             margin: 0;
             padding: 0;
-            display: flex;
             background-color: #f9f9f9;
+            color: #333;
+        }
+
+        /* Header styles */
+        header {
+            background-color: #000;
+            color: #fff;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            cursor: pointer; /* Makes the header clickable */
+        }
+
+        header h1 {
+            font-size: 1.5em;
+            margin: 0;
+            letter-spacing: 2px;
+            font-weight: bold;
         }
 
         /* Sidebar styles */
@@ -19,7 +36,7 @@
             background-color: #2f3b52;
             padding: 15px;
             color: #fff;
-            height: 100vh;
+            height: calc(100vh - 60px); /* Adjust for header */
             border-right: 2px solid #ccc;
             box-shadow: 2px 0 5px rgba(0,0,0,0.1);
         }
@@ -82,52 +99,61 @@
         .article.active {
             display: block;
         }
+
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
 
-    <!-- Sidebar -->
-    <div id="sidebar">
-        <h2>Sections</h2>
-        <ul>
-            <li><a href="#" onclick="showArticle('article1')">LLM Post-training</a></li>
-            <li><a href="#" onclick="showArticle('article2')">LLM Quantization</a></li>
-            <li><a href="#" onclick="showArticle('article3')">LLM stuff</a></li>
-            <li><a href="#" onclick="showArticle('article4')">Graph Neural Networks</a></li>
-            <li><a href="#" onclick="showArticle('article5')">Linear Programming</a></li>
-        </ul>
-    </div>
+    <!-- Header -->
+    <header onclick="showWelcomePage()">
+        <h1>AnelMusic</h1>
+    </header>
 
-    <!-- Main content -->
-    <div id="main-content">
-        <div id="welcome">
-            <h2>Welcome to the LLM Knowledge Hub</h2>
-            <p>Choose a section from the left to learn more about topics like LLM Post-training, Quantization, and more.</p>
+    <div style="display: flex;">
+        <!-- Sidebar -->
+        <div id="sidebar">
+            <h2>Sections</h2>
+            <ul>
+                <li><a href="#" onclick="showArticle('article1')">LLM Post-training</a></li>
+                <li><a href="#" onclick="showArticle('article2')">LLM Quantization</a></li>
+                <li><a href="#" onclick="showArticle('article3')">LLM stuff</a></li>
+                <li><a href="#" onclick="showArticle('article4')">Graph Neural Networks</a></li>
+                <li><a href="#" onclick="showArticle('article5')">Linear Programming</a></li>
+            </ul>
         </div>
 
-        <div id="article1" class="article">
-            <h2>LLM Post-training</h2>
-            <p>Here you can write about fine-tuning and post-training processes for large language models, just like the examples shown in the image.</p>
-        </div>
+        <!-- Main content -->
+        <div id="main-content">
+            <div id="welcome">
+                <h2>Welcome to the LLM Knowledge Hub</h2>
+                <p>Choose a section from the left to learn more about topics like LLM Post-training, Quantization, and more.</p>
+            </div>
 
-        <div id="article2" class="article">
-            <h2>LLM Quantization</h2>
-            <p>This section is all about LLM quantization techniques, like GPTQ and GGML, and how they can optimize large models for efficient performance.</p>
-        </div>
+            <div id="article1" class="article">
+                <h2>LLM Post-training</h2>
+                <p>Here you can write about fine-tuning and post-training processes for large language models, just like the examples shown in the image.</p>
+            </div>
 
-        <div id="article3" class="article">
-            <h2>LLM stuff</h2>
-            <p>This section covers various topics around LLMs, such as ChatGPT integration, decoding strategies, and more.</p>
-        </div>
+            <div id="article2" class="article">
+                <h2>LLM Quantization</h2>
+                <p>This section is all about LLM quantization techniques, like GPTQ and GGML, and how they can optimize large models for efficient performance.</p>
+            </div>
 
-        <div id="article4" class="article">
-            <h2>Graph Neural Networks</h2>
-            <p>In this section, you can explain the different types of graph neural networks such as GraphSAGE and Graph Convolution Networks (GCN).</p>
-        </div>
+            <div id="article3" class="article">
+                <h2>LLM stuff</h2>
+                <p>This section covers various topics around LLMs, such as ChatGPT integration, decoding strategies, and more.</p>
+            </div>
 
-        <div id="article5" class="article">
-            <h2>Linear Programming</h2>
-            <p>Here you can provide information on topics like constraint programming, integer programming, and solving complex optimization problems.</p>
+            <div id="article4" class="article">
+                <h2>Graph Neural Networks</h2>
+                <p>In this section, you can explain the different types of graph neural networks such as GraphSAGE and Graph Convolution Networks (GCN).</p>
+            </div>
+
+            <div id="article5" class="article">
+                <h2>Linear Programming</h2>
+                <p>Here you can provide information on topics like constraint programming, integer programming, and solving complex optimization problems.</p>
+            </div>
         </div>
     </div>
 
@@ -145,6 +171,17 @@
             // Show the selected article
             var articleToShow = document.getElementById(articleId);
             articleToShow.classList.add('active');
+        }
+
+        function showWelcomePage() {
+            // Hide all articles
+            var articles = document.querySelectorAll('.article');
+            articles.forEach(function(article) {
+                article.classList.remove('active');
+            });
+
+            // Show the welcome message
+            document.getElementById('welcome').style.display = 'block';
         }
     </script>
 
