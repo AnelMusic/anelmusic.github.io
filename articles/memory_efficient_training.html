@@ -210,7 +210,7 @@
                 <li><a href="/categories/coaching.html">Technical Coaching</a></li>
             </ul>
 
-            <h3>Popular Posts</h3>
+            <h3>Posts</h3>
             <ul>
                 <li><a href="/articles/rag-embeddings.html">RAG is more than embeddings</a></li>
                 <li><a href="/articles/memory-efficient-training.html">Memory-Efficient Training of LLMs</a></li>
@@ -262,6 +262,18 @@
 
                     <h3 id="gradient-checkpointing">Gradient Checkpointing</h3>
                     <p>Gradient checkpointing is an advanced technique employed to reduce the memory overhead associated with storing intermediate activations during deep learning model training. Typically, when backpropagating through a neural network, all intermediate activations from the forward pass are stored in memory to compute gradients. As the depth of the network or the size of the intermediate activations grows, the memory requirements can become substantial. Gradient checkpointing tackles this problem by not storing all intermediate activations but rather recomputing them as needed during the backward pass. This involves strategically saving a subset of the intermediate activations, referred to as "checkpoints," and then recomputing the non-saved activations during backpropagation by executing the forward pass operations again. While this approach trades off computation time for memory, it significantly reduces the memory overhead from gradients, making it possible to train deeper and more complex models on hardware with limited memory resources.</p>
+                    <h4 id="references">References</h4>
+                    <p>
+                        <a href="https://ieeexplore.ieee.org/document/8877390">https://ieeexplore.ieee.org/document/8877390</a><br>
+                        <a href="https://arxiv.org/pdf/2208.07339.pdf">https://arxiv.org/pdf/2208.07339.pdf</a><br>
+                        <a href="https://developer.nvidia.com/blog/achieving-fp32-accuracy-for-int8-inference-using-quantization-aware-training-with-tensorrt/">https://developer.nvidia.com/blog/achieving-fp32-accuracy-for-int8-inference-using-quantization-aware-training-with-tensorrt/</a><br>
+                        <a href="https://arxiv.org/abs/1710.02368">https://arxiv.org/abs/1710.02368</a><br>
+                        <a href="https://arxiv.org/abs/2106.09685">https://arxiv.org/abs/2106.09685</a><br>
+                        <a href="https://towardsdatascience.com/what-is-gradient-accumulation-in-deep-learning-ec034122cfa">https://towardsdatascience.com/what-is-gradient-accumulation-in-deep-learning-ec034122cfa</a><br>
+                        <a href="https://arxiv.org/abs/1604.06174v2">https://arxiv.org/abs/1604.06174v2</a><br>
+                        <a href="https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9">https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9</a><br>
+                        <a href="https://cloud.google.com/tpu/docs/bfloat16">https://cloud.google.com/tpu/docs/bfloat16</a>
+                    </p>
                 </div>
             </article>
         </main>
