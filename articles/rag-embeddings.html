@@ -4,79 +4,261 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAG is more than embeddings - Your Blog</title>
-    <!-- Use the same styles as main page -->
     <style>
-        /* Copy all styles from above */
-        /* Add article-specific styles */
-        .article-content {
-            max-width: 100%;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            display: flex;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #1a1a1a;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            z-index: 1000;
+            height: 60px;
+        }
+
+        .navbar a {
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .content-wrapper {
+            display: flex;
+            margin-top: 60px;
+            width: 100%;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #f5f5f5;
+            padding: 2rem;
+            position: fixed;
+            left: 0;
+            top: 60px;
+            bottom: 0;
+            overflow-y: auto;
+        }
+
+        .main-content {
+            margin-left: 250px;
+            margin-right: 300px;
+            padding: 2rem;
+            max-width: 800px;
+        }
+
+        .right-sidebar {
+            width: 300px;
+            padding: 2rem 1.5rem;
+            position: fixed;
+            right: 0;
+            top: 60px;
+            bottom: 0;
+            background: #ffffff;
+            border-left: 1px solid #eee;
+            overflow-y: auto;
         }
 
         .article-header {
             margin-bottom: 2rem;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 1rem;
         }
 
-        .article-meta {
+        .article-date {
             color: #666;
-            font-size: 0.9rem;
-            margin: 1rem 0;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
         }
 
-        .article-body {
+        .article-content {
             font-size: 1.1rem;
             line-height: 1.8;
         }
 
-        .article-body h2 {
+        .article-content h2 {
             margin: 2rem 0 1rem 0;
+            font-size: 1.8rem;
         }
 
-        .article-body p {
+        .article-content h3 {
+            margin: 1.5rem 0 0.8rem 0;
+            font-size: 1.4rem;
+        }
+
+        .article-content p {
             margin-bottom: 1.5rem;
+        }
+
+        .article-content code {
+            background: #f5f5f5;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+
+        .article-content pre {
+            background: #f5f5f5;
+            padding: 1rem;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 1.5rem 0;
+        }
+
+        .sidebar h3 {
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        .sidebar ul {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+
+        .sidebar a {
+            color: #555;
+            text-decoration: none;
+            display: block;
+            padding: 0.3rem 0;
+            font-size: 0.9rem;
+        }
+
+        .sidebar a:hover {
+            color: #4169e1;
+        }
+
+        .toc {
+            font-size: 0.9rem;
+        }
+
+        .toc h2 {
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .toc ul {
+            list-style: none;
+        }
+
+        .toc li {
+            margin-bottom: 1rem;
+        }
+
+        .toc a {
+            color: #666;
+            text-decoration: none;
+            display: block;
+            padding: 0.2rem 0;
+            transition: color 0.2s;
+        }
+
+        @media (max-width: 1200px) {
+            .right-sidebar {
+                display: none;
+            }
+            .main-content {
+                margin-right: 0;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+            .main-content {
+                margin-left: 0;
+            }
         }
     </style>
 </head>
 <body>
-    <!-- Same navbar -->
     <nav class="navbar">
         <a href="/" style="font-weight: bold;">yourblog.io</a>
-        <a href="/consulting.html">Consulting</a>
-        <a href="/writing.html">Writing</a>
-        <a href="/about.html">About</a>
+        <a href="/consulting">Consulting</a>
+        <a href="/writing">Writing</a>
+        <a href="/about">About</a>
     </nav>
 
     <div class="content-wrapper">
-        <!-- Same sidebar -->
         <aside class="sidebar">
             <h3>Recent Articles</h3>
             <ul>
-                <li><a href="/articles/rag-systems.html">RAG Systems Deep Dive</a></li>
-                <li><a href="/articles/ai-consulting.html">AI Consulting Lessons</a></li>
-                <li><a href="/articles/tech-architecture.html">Technical Architecture</a></li>
+                <li><a href="/articles/rag-systems">RAG Systems Deep Dive</a></li>
+                <li><a href="/articles/ai-consulting">AI Consulting Lessons</a></li>
+                <li><a href="/articles/tech-architecture">Technical Architecture</a></li>
             </ul>
-            <!-- Rest of sidebar content -->
+
+            <h3>Categories</h3>
+            <ul>
+                <li><a href="/categories/personal-writing">Personal Writing</a></li>
+                <li><a href="/categories/technical-posts">Technical Posts</a></li>
+                <li><a href="/categories/coaching">Technical Coaching</a></li>
+                <li><a href="/categories/talks">Talks & Podcasts</a></li>
+            </ul>
+
+            <h3>Popular Posts</h3>
+            <ul>
+                <li><a href="/articles/rag-embeddings">RAG is more than embeddings</a></li>
+                <li><a href="/articles/indie-consulting">Indie Consulting Guide</a></li>
+                <li><a href="/articles/tool-retrieval">Tool Retrieval in RAG</a></li>
+            </ul>
         </aside>
 
         <main class="main-content">
-            <article class="article-content">
+            <article>
                 <header class="article-header">
                     <h1>RAG is more than embeddings</h1>
-                    <div class="article-meta">
-                        <span>October 28, 2024</span>
-                        <span>·</span>
-                        <span>Technical Posts</span>
-                    </div>
+                    <div class="article-date">October 28, 2024</div>
                 </header>
 
-                <div class="article-body">
-                    <p>When people think about RAG systems, they often focus primarily on embeddings. While embeddings are crucial, they're just one piece of the puzzle...</p>
+                <div class="article-content">
+                    <p>When people think about RAG systems, they often focus primarily on embeddings. While embeddings are crucial, they're just one piece of the puzzle. In this post, we'll explore the full spectrum of components that make up an effective RAG system.</p>
 
                     <h2>The Components of RAG</h2>
-                    <p>A complete RAG system consists of multiple components working together:</p>
-                    <!-- Article content continues -->
+                    <p>A complete RAG system consists of multiple components working together harmoniously:</p>
+
+                    <h3>1. Document Processing</h3>
+                    <p>Before we even get to embeddings, proper document processing is crucial...</p>
+
+                    <h3>2. Embedding Strategy</h3>
+                    <p>While embeddings are important, the strategy behind them matters more than the specific model...</p>
+
+                    <h3>3. Retrieval Mechanisms</h3>
+                    <p>The way we retrieve and rank relevant content can make or break a RAG system...</p>
                 </div>
             </article>
         </main>
+
+        <aside class="right-sidebar">
+            <div class="toc">
+                <h2>Contents</h2>
+                <ul>
+                    <li><a href="#components">The Components of RAG</a></li>
+                    <li><a href="#document-processing">Document Processing</a></li>
+                    <li><a href="#embedding-strategy">Embedding Strategy</a></li>
+                    <li><a href="#retrieval-mechanisms">Retrieval Mechanisms</a></li>
+                </ul>
+            </div>
+        </aside>
     </div>
 </body>
 </html>
