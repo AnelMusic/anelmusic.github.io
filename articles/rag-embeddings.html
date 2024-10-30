@@ -149,7 +149,7 @@
         <a href="/" style="font-weight: bold;">anelmusic</a>
         <a href="/consulting.html">Consulting</a>
         <a href="/writing.html">Writing</a>
-        <a href="/about.html">About</a>
+        <!-- <a href="/about.html">About</a> -->
     </nav>
 
     <div class="content-wrapper">
@@ -176,7 +176,7 @@
                 <div class="article-content">
                     <p>When people think about RAG systems, they often focus primarily on embeddings. While embeddings are crucial, they're just one piece of the puzzle. In this post, we'll explore why RAG systems require a more comprehensive approach.</p>
 
-                    <h2>Beyond Simple Vector Similarity</h2>
+                    <h2 id="vector-similarity">Beyond Simple Vector Similarity</h2>
                     <p>The common approach of using embeddings and cosine similarity for retrieval is just the beginning. Modern RAG systems need to consider:</p>
                     <ul>
                         <li>Context preservation</li>
@@ -184,10 +184,10 @@
                         <li>Query understanding</li>
                     </ul>
 
-                    <h2>The Full RAG Pipeline</h2>
+                    <h2 id="rag-pipeline">The Full RAG Pipeline</h2>
                     <p>A complete RAG system consists of several critical components:</p>
 
-                    <h3>1. Document Processing</h3>
+                    <h3 id="document-processing">1. Document Processing</h3>
                     <p>Before we even get to embeddings, proper document processing is crucial. This includes:</p>
                     <ul>
                         <li>Chunking strategies</li>
@@ -195,7 +195,7 @@
                         <li>Structure preservation</li>
                     </ul>
 
-                    <h3>2. Query Processing</h3>
+                    <h3 id="query-processing">2. Query Processing</h3>
                     <p>Understanding and optimizing the query is just as important as document processing. This involves:</p>
                     <ul>
                         <li>Query expansion</li>
@@ -203,7 +203,7 @@
                         <li>Context windowing</li>
                     </ul>
 
-                    <h3>3. Retrieval Strategy</h3>
+                    <h3 id="retrieval-strategy">3. Retrieval Strategy</h3>
                     <p>The retrieval phase needs to balance multiple factors:</p>
                     <ul>
                         <li>Hybrid retrieval approaches</li>
@@ -211,11 +211,69 @@
                         <li>Relevance scoring</li>
                     </ul>
 
-                    <h2>Conclusion</h2>
+                    <h2 id="conclusion">Conclusion</h2>
                     <p>While embeddings are an essential component of RAG systems, focusing solely on them misses the bigger picture. Building effective RAG systems requires careful attention to the entire pipeline, from document processing to final retrieval and synthesis.</p>
                 </div>
             </article>
         </main>
+
+        <aside class="right-sidebar">
+            <div class="toc">
+                <h2>Contents</h2>
+                <ul>
+                    <li><a href="#vector-similarity">Beyond Simple Vector Similarity</a></li>
+                    <li><a href="#rag-pipeline">The Full RAG Pipeline</a>
+                        <ul style="margin-left: 1rem; margin-top: 0.5rem;">
+                            <li><a href="#document-processing">Document Processing</a></li>
+                            <li><a href="#query-processing">Query Processing</a></li>
+                            <li><a href="#retrieval-strategy">Retrieval Strategy</a></li>
+                        </ul>
+                    </li>
+                    <li><a href="#conclusion">Conclusion</a></li>
+                </ul>
+            </div>
+        </aside>
     </div>
+
+    <script>
+        // Highlight current section in TOC
+        const observerOptions = {
+            root: null,
+            rootMargin: '-80px 0px -50% 0px',
+            threshold: 0
+        };
+
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    document.querySelectorAll('.toc a').forEach(link => {
+                        link.classList.remove('active');
+                    });
+                    
+                    const id = entry.target.getAttribute('id');
+                    const correspondingLink = document.querySelector(`.toc a[href="#${id}"]`);
+                    if (correspondingLink) {
+                        correspondingLink.classList.add('active');
+                    }
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('h2, h3').forEach(section => {
+            observer.observe(section);
+        });
+
+        // Smooth scroll for TOC links
+        document.querySelectorAll('.toc a').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetId = link.getAttribute('href');
+                const targetElement = document.querySelector(targetId);
+                if (targetElement) {
+                    targetElement.scrollIntoView({ behavior: 'smooth' });
+                }
+            });
+        });
+    </script>
 </body>
 </html>
