@@ -78,11 +78,11 @@ If you rewrite earlier sections (even if the meaning is unchanged), you change t
 
 * **Stable prefix**: system instructions, policies, tool schemas, examples
 * **Append only context**: conversation turns, tool outputs, summaries
-* **Delta** (always last): newest observation, tool output, or user message; runtime controls; timestamps
+* **Delta** (always last): newest observation, tool output, or user message; runtime controls, timestamps
 
 The strongest version of the rule is:
 
-> Step N should be Step N−1 plus appended text, not a rewritten version of Step N−1.
+> Step N should be Step N−1 plus appended text.
 
 
 ## 5. Determinism in Tool Schema Definitions
