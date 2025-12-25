@@ -67,8 +67,8 @@ OpenAI's prompt caching stores the **longest previously computed prefix**, start
 
 ### Cache Retention and Eviction
 
-Default caching is in memory and therefore time sensitive. If there is a long pause between steps, cached prefixes can be evicted. For workloads with pauses (support tickets, asynchronous agent workflows), extended retention is often the difference between occasional benefit and reliable benefit.
-
+Default caching is in memory and therefore time sensitive. If there is a long pause between steps, cached prefixes can be evicted. For workloads with pauses (support tickets, asynchronous agent workflows), extended retention is often the difference between occasional benefit and reliable benefit. As per OpenAI:
+> When using the in-memory policy, cached prefixes generally remain active for 5 to 10 minutes of inactivity, up to a maximum of one hour. Extended prompt cache retention keeps cached prefixes active for longer, up to a maximum of 24 hours but is available only for certain models.
 
 ## 4. The Cache Contract: Prefix Stability and Append Only Semantics
 
