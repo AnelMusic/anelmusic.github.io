@@ -164,6 +164,7 @@ def cache_stats(resp):
 ```
 
 ### Timestamp Placement
+In practice, agents rarely benefit from including timestamps in the prompt at all. If you have a valid reason to include one, treat it as volatile runtime data and append it at the very end of the prompt so it doesn’t break prefix caching.
 
 Incorrect (modifies prefix on every request):
 
