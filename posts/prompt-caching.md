@@ -1,4 +1,3 @@
-````md
 # KV Cache Optimization for Agentic AI
 
 ## A production engineering guide to prompt caching, masking, and making your agent economically and latently scalable
