@@ -15,7 +15,7 @@ Agentic systems repeatedly send the same lengthy prefix (system prompt, tool sch
 8. Logit Level Constraints for Self Hosted Models
 9. Diagnosing Cache Failures
 10. Production Considerations
-11. Appendix A: Worked Example (AcmeSupport)
+11. Appendix A: Worked Example (SomeRandomCompanySupport)
 12. Appendix B: Common Failure Modes
 
 
@@ -41,11 +41,7 @@ If the cached fraction is high and stable, your agent architecture can scale eco
 
 ## 2. Cost Implications for Agentic Architectures
 
-Single turn chat systems can be surprisingly tolerant of inefficiency. Including a large system prompt or verbose policy section may result in only a mild cost increase.
-
-Agentic systems are not tolerant of such inefficiency because they operate iteratively.
-
-Consider AcmeSupport, which handles "I was charged twice" tickets. A typical resolution involves not one call but a loop:
+Single turn chat systems can be surprisingly tolerant of inefficiency. Including a large system prompt or verbose policy section may result in only a mild cost increase. Agentic systems, however, are not tolerant of such inefficiency because they operate iteratively. Consider SomeRandomCompanySupport, which handles "I was charged twice" tickets. A typical resolution involves not one call but a loop:
 
 1. Read ticket and conversation context, decide next action
 2. Call `BILLING_lookup_invoice`
@@ -338,7 +334,7 @@ The practical debugging method is to treat the prompt as a binary artifact: stor
 * In memory retention is time limited; extended retention stabilizes workflows with variable request timing.
 
 
-## Appendix A: Worked Example (AcmeSupport)
+## Appendix A: Worked Example (SomeRandomCompanySupport)
 
 This appendix demonstrates a single agent resolving one ticket in three steps. The precise token counts are illustrative; the qualitative pattern is the focus.
 
@@ -352,7 +348,7 @@ Assumptions:
 **Stable prefix** (unchanged across steps):
 
 ```
-[SYSTEM] You are AcmeSupport, a customer support agent...
+[SYSTEM] You are SomeRandomCompanySupport, a customer support agent...
 [POLICY] Verify identity, be concise, never leak private data...
 [TOOLS] (all tool schemas, canonical order)
 ```
