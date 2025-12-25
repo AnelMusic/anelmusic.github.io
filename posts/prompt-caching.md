@@ -87,11 +87,9 @@ The strongest version of the rule is:
 
 ## 5. Determinism in Tool Schema Definitions
 
-This is a frequently overlooked source of cache failures.
-
 Tools can benefit from prompt caching only if their definitions are **identical** between the requests that are expected to share cached prefixes. "Identical" is not semantic equivalence. It is literal token level identity.
 
-"Stable tool schemas" means your tool definitions must produce the same token stream on every request. This requires both stable ordering and stable serialization.
+"Stable tool schemas" means your tool definitions must produce the same token stream on every request. This requires both stable ordering and stable serialization. Nondeterministic ordering and serialization are frequently overlooked reasons for cache failure.
 
 ### Stable Ordering
 
