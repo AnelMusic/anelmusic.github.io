@@ -4,9 +4,6 @@ Agentic systems repeatedly send the same long prefix (system prompt, tool schema
 
 OpenAI’s **Prompt Caching** is the primary systems mechanism that amortizes this cost. When requests share an **exact prompt prefix**, OpenAI can reuse previously computed attention key/value tensors for that prefix, reducing both latency (time-to-first-token) and input cost on subsequent calls. Prompt caching begins once the prompt reaches **1,024 tokens**, and the cached prefix extends in **128-token increments** as longer prefixes are reused.
 
-This document is written as an engineering chapter: a mental model first, then implementation constraints, then operational patterns. We will keep one concrete running example—AcmeSupport, a tool-using customer support agent—so the ideas remain grounded and testable.
-
-
 ## Table of Contents
 
 1. Executive Summary
@@ -34,14 +31,14 @@ In production, one metric summarizes whether your architecture is behaving:
 
 > **How many prompt tokens were served from cache?**
 
-OpenAI exposes this as `usage.prompt_tokens_details.cached_tokens`. Requests below the threshold will still show the field—it will simply be zero.
+OpenAI exposes this as `usage.prompt_tokens_details.cached_tokens`. Requests below the threshold will still show the field, it will simply be zero.
 
 Key thresholds:
 
 * Prompt caching applies automatically for prompts **≥ 1024 tokens**.
 * The cached-prefix length grows in **128-token increments**.
 
-If the cached fraction is high and stable, you have an agent architecture that can scale economically. If it is low or volatile, you are paying repeated prefill cost on every step—often without realizing it.
+If the cached fraction is high and stable, you have an agent architecture that can scale economically. If it is low or volatile, you are paying repeated prefill cost on every step, often without realizing it.
 
 
 ## 2) The Prefill Tax: why agents amplify cost
@@ -50,7 +47,7 @@ Single-turn chat systems can be surprisingly tolerant of waste. You might includ
 
 Agents are not tolerant, because they repeat.
 
-Consider AcmeSupport, which handles “I was charged twice” tickets. A typical resolution is not one call—it is a loop:
+Consider AcmeSupport, which handles “I was charged twice” tickets. A typical resolution is not one call, it is a loop:
 
 1. Read ticket and conversation context, decide next action
 2. Call `BILLING_lookup_invoice`
@@ -342,7 +339,7 @@ Then consider `prompt_cache_key` (routing affinity) and extended retention (`24h
 * Avoid dynamic tool removal; keep tools stable and use `allowed_tools` gating.
 
 
-# Appendix — AcmeSupport walkthrough: 3 steps, what the prompt looks like, and what `cached_tokens` should do
+# Appendix ,  AcmeSupport walkthrough: 3 steps, what the prompt looks like, and what `cached_tokens` should do
 
 This appendix shows the same agent resolving a single ticket in three steps. The precise token counts are not the point; the qualitative pattern is.
 
@@ -351,7 +348,7 @@ Assume:
 * Stable prefix (system + policies + tools): ~2,200 tokens
 * Each step appends ~200–600 tokens
 
-### Step 1 — Cold start: read ticket, decide next action
+### Step 1 ,  Cold start: read ticket, decide next action
 
 Stable prefix (unchanged across steps):
 
@@ -391,7 +388,7 @@ Illustrative usage:
 ```
 
 
-### Step 2 — Append tool result, continue reasoning (cache should kick in)
+### Step 2 ,  Append tool result, continue reasoning (cache should kick in)
 
 Assume step 1 triggered a tool call like `BILLING_lookup_invoice(order_id="A123")`.
 
@@ -438,7 +435,7 @@ Illustrative usage:
 ```
 
 
-### Step 3 — Append refund action + confirmation, finalize
+### Step 3 ,  Append refund action + confirmation, finalize
 
 Assume step 2 decided to refund the duplicate charge using `BILLING_initiate_refund`.
 
@@ -489,7 +486,7 @@ Illustrative usage:
 ```
 
 
-# Appendix — Anti-pattern gallery (how cache hits collapse)
+# Appendix ,  Anti-pattern gallery (how cache hits collapse)
 
 This section shows the failure modes that most often produce “we enabled caching, but it did nothing.”
 
