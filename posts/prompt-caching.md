@@ -1,7 +1,5 @@
----
 layout: default
 title: The most important metric for Agentic AI
----
 
 # KV Cache Optimization for Agentic AI
 
@@ -11,7 +9,6 @@ OpenAI’s **Prompt Caching** is the primary systems mechanism that amortizes th
 
 This document is written as an engineering chapter: a mental model first, then implementation constraints, then operational patterns. We will keep one concrete running example—AcmeSupport, a tool-using customer support agent—so the ideas remain grounded and testable.
 
----
 
 ## Table of Contents
 
@@ -29,7 +26,6 @@ This document is written as an engineering chapter: a mental model first, then i
 12. Appendix: AcmeSupport walkthrough (3 steps)
 13. Appendix: Anti-pattern gallery (how cache hits collapse)
 
----
 
 ## 1) Executive Summary: the one metric that predicts your bill
 
@@ -50,7 +46,6 @@ Key thresholds:
 
 If the cached fraction is high and stable, you have an agent architecture that can scale economically. If it is low or volatile, you are paying repeated prefill cost on every step—often without realizing it.
 
----
 
 ## 2) The Prefill Tax: why agents amplify cost
 
@@ -70,7 +65,6 @@ Even this “simple” ticket becomes 3–5 model calls. Real agent stacks inclu
 
 The critical observation is that the new information per step is usually small (a tool result, an observation), while the prefix remains large (instructions, policies, tool schemas). Without caching, you pay the prefill cost repeatedly for the same prefix. With caching, you amortize the prefill cost across steps. This is precisely the regime prompt caching is built for.
 
----
 
 ## 3) What Prompt Caching Actually Does
 
@@ -87,7 +81,6 @@ OpenAI’s prompt caching caches the **longest previously computed prefix**, sta
 
 Default caching is in-memory and therefore time-sensitive. If there is a long pause between steps, cached prefixes can be evicted. For workloads with pauses (support tickets, async agent workflows), extended retention is often the difference between “occasionally helpful” and “reliably helpful.”
 
----
 
 ## 4) The Cache Contract: stable prefix, append-only suffix
 
@@ -103,7 +96,6 @@ The strongest version of the rule is:
 
 > Step N should be Step N−1 plus appended text, not a rewritten version of Step N−1.
 
----
 
 ## 5) Determinism: “stable tool schemas” explained (order + serialization)
 
@@ -160,7 +152,6 @@ def canonical_json(obj) -> str:
 
 Treat tool schemas like an API contract: versioned, deterministic, stable. If you must change tool definitions, do it as a deliberate version bump and accept that you are warming a new cache.
 
----
 
 ## 6) OpenAI implementation (Responses API): build for reuse, measure for regressions
 
@@ -223,7 +214,6 @@ resp = client.responses.create(
 print(cache_stats(resp))
 ```
 
----
 
 ## 7) Masking tools on OpenAI (soft → hard → best practice)
 
@@ -274,7 +264,6 @@ resp = client.responses.create(
 
 If your step is an “executor” stage where a tool call is mandatory, use `mode: "required"` to force a tool call among the allowed subset.
 
----
 
 ## 8) Logit-level masking (self-hosted / Manus-style)
 
@@ -322,7 +311,6 @@ class AllowedToolNameProcessor(LogitsProcessor):
 
 This is conceptual (real tool names tokenize across multiple tokens), but it captures the principle: you enforce the action space at the decoder, rather than asking the model politely.
 
----
 
 ## 9) Debugging: why your cache hit rate is secretly zero
 
@@ -336,7 +324,6 @@ If `cached_tokens` is 0 when you expected hits, the usual causes are:
 
 The practical debugging method is to treat the prompt like a binary: store the exact strings for step 1 and step 2 and diff them. If the diff shows edits near the top, the cache metrics will reflect that reality.
 
----
 
 ## 10) Production checklist
 
@@ -349,7 +336,6 @@ A minimal production checklist:
 
 Then consider `prompt_cache_key` (routing affinity) and extended retention (`24h`) when supported and warranted by your workload.
 
----
 
 ## 11) Quick reference
 
@@ -358,7 +344,6 @@ Then consider `prompt_cache_key` (routing affinity) and extended retention (`24h
 * In-memory retention is time-limited; extended retention can stabilize bursty or paused workflows.
 * Avoid dynamic tool removal; keep tools stable and use `allowed_tools` gating.
 
----
 
 # Appendix — AcmeSupport walkthrough: 3 steps, what the prompt looks like, and what `cached_tokens` should do
 
@@ -408,7 +393,6 @@ Illustrative usage:
 }
 ```
 
----
 
 ### Step 2 — Append tool result, continue reasoning (cache should kick in)
 
@@ -456,7 +440,6 @@ Illustrative usage:
 }
 ```
 
----
 
 ### Step 3 — Append refund action + confirmation, finalize
 
@@ -508,7 +491,6 @@ Illustrative usage:
 }
 ```
 
----
 
 # Appendix — Anti-pattern gallery (how cache hits collapse)
 
@@ -612,7 +594,6 @@ Why it breaks caching: if you reorder, reformat, or summarize earlier content in
 
 Safer pattern: append new turns and tool outputs. If you must summarize, append a summary block rather than rewriting earlier text, unless you accept cache disruption.
 
----
 
 End of document.
 
