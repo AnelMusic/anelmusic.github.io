@@ -1,8 +1,9 @@
 ---
-title: anelmusic
+layout: default
 ---
+
 # Posts
 
 **[The most important metric for Agentic AI](posts/prompt-caching)**  
-Decembre 12, 2025 
+December 12, 2025
 
