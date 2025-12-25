@@ -1,6 +1,3 @@
-layout: default
-title: The most important metric for Agentic AI
-
 # KV Cache Optimization for Agentic AI
 
 Agentic systems repeatedly send the same long prefix (system prompt, tool schemas, policies, few-shot examples) and only change a small suffix (latest observation, tool output, user message). That makes them uniquely sensitive to **prompt prefill** costs and latency: you are effectively paying to reprocess the same “program header” on every step.
