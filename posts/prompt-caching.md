@@ -23,7 +23,7 @@ Agentic systems repeatedly send the same lengthy prefix (system prompt, tool sch
 
 Prompt caching has a single hard requirement:
 
-**Cache hits require exact prefix matches.** Static content must appear first; dynamic content must appear last. This principle applies to tool definitions as well: if tool schemas differ between requests, that portion cannot be cached.
+**Cache hits require exact prefix matches.** Static content must appear first and dynamic content must appear last. This principle applies to tool definitions as well: if tool schemas differ between requests, that portion cannot be cached.
 
 In production, one metric summarizes whether your architecture is behaving correctly:
 
