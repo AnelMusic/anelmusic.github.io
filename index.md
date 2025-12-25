@@ -1,7 +1,3 @@
----
-layout: default
----
-
 # Posts
 
 **[The most important metric for Agentic AI](posts/prompt-caching)**  
