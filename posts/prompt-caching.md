@@ -5,8 +5,6 @@ title: The most important metric for Agentic AI
 
 # KV Cache Optimization for Agentic AI
 
-## A production engineering guide to prompt caching, masking, and making your agent economically and latently scalable
-
 Agentic systems repeatedly send the same long prefix (system prompt, tool schemas, policies, few-shot examples) and only change a small suffix (latest observation, tool output, user message). That makes them uniquely sensitive to **prompt prefill** costs and latency: you are effectively paying to reprocess the same “program header” on every step.
 
 OpenAI’s **Prompt Caching** is the primary systems mechanism that amortizes this cost. When requests share an **exact prompt prefix**, OpenAI can reuse previously computed attention key/value tensors for that prefix, reducing both latency (time-to-first-token) and input cost on subsequent calls. Prompt caching begins once the prompt reaches **1,024 tokens**, and the cached prefix extends in **128-token increments** as longer prefixes are reused.
