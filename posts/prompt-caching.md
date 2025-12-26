@@ -3,23 +3,9 @@
 
 Agentic systems repeatedly send the same lengthy prefix (system prompt, tool schemas, policies, few shot examples) and modify only a small suffix (latest observation, tool output, user message). This characteristic makes such systems particularly sensitive to prompt prefill costs and latency, as the same "program header" is reprocessed on every step. Fortunately, when requests share an exact prompt prefix, the inference provider can reuse previously computed attention key/value tensors for that prefix, thereby reducing both latency (time to first token) and input cost on subsequent calls. On OpenAI specifically, prompt caching activates once the prompt reaches 1,024 tokens, and the cached prefix extends in 128 token increments as longer prefixes are reused. Other providers may have different thresholds, but the core mechanism remains the same.
 
-## Table of Contents
-
-1. Overview
-2. Cost Implications for Agentic Architectures
-3. Mechanism of Prompt Caching
-4. The Cache Contract: Prefix Stability and Append Only Semantics
-5. Determinism in Tool Schema Definitions
-6. Implementation on OpenAI (Responses API)
-7. Tool Masking Strategies
-8. Logit Level Constraints for Self Hosted Models
-9. Diagnosing Cache Failures
-10. Production Considerations
-11. Appendix A: Worked Example (SomeRandomCompanySupport)
-12. Appendix B: Common Failure Modes
 
 
-## 1. Overview
+## Overview
 
 Prompt caching has a single hard requirement:
 
@@ -39,7 +25,7 @@ Key thresholds:
 If the cached fraction is high and stable, your agent architecture can scale economically. If it is low or volatile, you are paying repeated prefill cost on every step, often without realizing it.
 
 
-## 2. Cost Implications for Agentic Architectures
+## Cost Implications for Agentic Architectures
 
 Single turn chat systems can be surprisingly tolerant of inefficiency. Including a large system prompt or verbose policy section may result in only a mild cost increase. Agentic systems, however, are not tolerant of such inefficiency because they operate iteratively. Consider SomeRandomCompanySupport, which handles "I was charged twice" tickets. A typical resolution involves not one call but a loop:
 
@@ -54,7 +40,7 @@ Even this relatively simple ticket requires 3 to 5 model calls. Real agent stack
 The critical observation is that the new information per step is usually small (a tool result, an observation), while the prefix remains large (instructions, policies, tool schemas). Without caching, the prefill cost is paid repeatedly for the same prefix. With caching, the prefill cost is amortized across steps. This is precisely the regime prompt caching is designed for.
 
 
-## 3. Mechanism of Prompt Caching
+## Mechanism of Prompt Caching
 
 Two concepts are often conflated:
 
@@ -70,7 +56,7 @@ OpenAI's prompt caching stores the **longest previously computed prefix**, start
 Default caching is in memory and therefore time sensitive. If there is a long pause between steps, cached prefixes can be evicted. For workloads with pauses (support tickets, asynchronous agent workflows), extended retention is often the difference between occasional benefit and reliable benefit. As per OpenAI:
 > When using the in-memory policy, cached prefixes generally remain active for 5 to 10 minutes of inactivity, up to a maximum of one hour. Extended prompt cache retention keeps cached prefixes active for longer, up to a maximum of 24 hours but is available only for certain models.
 
-## 4. The Cache Contract: Prefix Stability and Append Only Semantics
+## The Cache Contract: Prefix Stability and Append Only Semantics
 
 A cache friendly prompt behaves less like a narrative and more like a program whose header must remain stable.
 
@@ -85,7 +71,7 @@ The strongest version of the rule is:
 > Step N should be Step N−1 plus appended text.
 
 
-## 5. Determinism in Tool Schema Definitions
+## Determinism in Tool Schema Definitions
 
 Tools can benefit from prompt caching only if their definitions are **identical** between the requests that are expected to share cached prefixes. "Identical" is not semantic equivalence. It is literal token level identity.
 
@@ -141,7 +127,7 @@ def canonical_json(obj) -> str:
 Treat tool schemas as an API contract: versioned, deterministic, stable. If you must modify tool definitions, do so as a deliberate version increment and accept that you are warming a new cache.
 
 
-## 6. Implementation on OpenAI (Responses API)
+## Implementation on OpenAI (Responses API)
 
 At this point, the conceptual requirements should be clear: prompt caching only works when requests share an **identical prefix**. The API does not enforce this for you. It simply rewards you when you get it right and silently penalizes you when you don’t.
 
@@ -179,7 +165,7 @@ In production, this data should be logged alongside latency (especially time-to-
 If cache hit rate suddenly drops after a deploy, something in your prefix changed—often unintentionally.
 
 
-### 6.2 Prompt construction: why “small” changes have large effects
+### Prompt construction: why “small” changes have large effects
 
 Most cache regressions come from prompt construction that *looks* harmless.
 
@@ -213,7 +199,7 @@ This pattern generalizes beyond timestamps: request IDs, experiment flags, debug
 
 
 
-### 6.3 Routing affinity and cache retention
+### Routing affinity and cache retention
 
 Prompt caching is not just about matching text; it is also about **where** requests land.
 
@@ -251,7 +237,7 @@ Some important nuances:
 A useful mental model is to think of the cache as **warm state**, not persistent storage. If you expect reuse across time gaps, you must opt into longer retention.
 
 
-### 6.4 The practical test: does Step N reuse Step N−1?
+### The practical test: does Step N reuse Step N−1?
 
 After implementing the above, you should be able to answer one concrete question:
 
@@ -262,7 +248,7 @@ If the answer is yes, cached tokens should increase monotonically across steps (
 This is why prompt caching often fails not due to misunderstanding the API, but due to subtle violations of immutability in prompt construction.
 
 
-## 7. Masking Tools on OpenAI: restricting behavior without breaking caching
+## Masking Tools on OpenAI: restricting behavior without breaking caching
 
 Tool masking is where many otherwise well-designed agent systems quietly sabotage their cache hit rate.
 
@@ -270,7 +256,7 @@ The motivation is reasonable: at any given step, only a subset of tools is relev
 
 From a caching perspective, this is exactly the wrong thing to do.
 
-### 7.1 Why dynamic tool removal breaks caching
+### Why dynamic tool removal breaks caching
 
 Tool schemas are typically part of the **stable prefix**. They are large, appear early in the prompt, and change rarely by design. This makes them ideal candidates for caching.
 
@@ -287,7 +273,7 @@ This is why masking must be implemented **without mutating the tool list**.
 
 
 
-### 7.2 Soft masking: instructing the model, not enforcing it
+### Soft masking: instructing the model, not enforcing it
 
 The simplest approach is to keep all tools in the prompt and instruct the model which ones are currently allowed.
 
@@ -314,7 +300,7 @@ For production agent systems, soft masking is often a stepping stone, not the fi
 
 
 
-### 7.3 Hard masking with `allowed_tools`: the cache-safe enforcement mechanism
+### Hard masking with `allowed_tools`: the cache-safe enforcement mechanism
 
 OpenAI provides a mechanism specifically designed to solve this problem: **allowed tools**.
 
@@ -325,7 +311,7 @@ The key idea is simple:
 
 This preserves a cacheable prefix while constraining the model’s action space.
 
-#### The anti-pattern (what not to do)
+#### The anti-pattern 
 
 ```python
 # BAD: tool list changes per request
@@ -371,7 +357,7 @@ This is the preferred production pattern.
 
 
 
-### 7.4 `auto` vs `required`: choosing the right enforcement level
+### `auto` vs `required`: choosing the right enforcement level
 
 The `allowed_tools` mechanism supports different modes, and the choice matters.
 
@@ -405,7 +391,7 @@ This enforces structure without compromising caching.
 
 
 
-### 7.5 Tool groups as an action-space abstraction
+### Tool groups as an action-space abstraction
 
 Many mature agent systems group tools by function (`CLI_`, `MATH_`, `BILLING_`, etc.). This is not merely organizational—it enables **step-level action-space control**.
 
@@ -423,7 +409,7 @@ This framing aligns well with both:
 
 
 
-### 7.6 The design principle to internalize
+### The design principle to internalize
 
 If there is one principle to carry forward, it is this:
 
@@ -434,7 +420,7 @@ Structure (tool schemas, order, serialization) must remain stable to enable cach
 Once this distinction is internalized, tool masking stops being a source of cache regressions and becomes a clean, composable part of agent design.
 
 
-## 8. Logit Level Constraints for Self Hosted Models (Optional)
+## Logit Level Constraints for Self Hosted Models (Optional)
 
 On hosted APIs token level logit manipulation is typically unavailable. You can guide behavior through prompting and API level controls but you cannot directly change the probability assigned to individual tokens.
 
@@ -492,13 +478,13 @@ Earlier sections discussed grouping tools by prefix such as CLI MATH or BILLING 
 
 It's worth noting that logit level masking does not interfere with prompt caching. Prompt caching operates on the input tokens that form the prompt prefix. Logit level masking operates on the output distribution during decoding. These mechanisms are orthogonal. 
 
-### 8.1 When logit level masking is justified
+### When logit level masking is justified
 
 Logit level masking introduces additional decoding complexity and engineering overhead. It is typically justified when tool misuse is costly or dangerous when executor stages must be strictly controlled or when determinism and reproducibility matter more than flexibility. For many teams API level constraints such as allowed tools are sufficient. For teams operating self hosted models with tight safety or correctness requirements logit level constraints become a natural next step.
 
 
 
-## 9. Diagnosing Cache Failures
+## Diagnosing Cache Failures
 
 If `cached_tokens` is 0 when hits are expected, the usual causes are:
 
@@ -511,7 +497,7 @@ If `cached_tokens` is 0 when hits are expected, the usual causes are:
 The practical debugging method is to treat the prompt as a binary artifact: store the exact strings for step 1 and step 2 and diff them. If the diff shows edits near the top, the cache metrics will reflect that.
 
 
-## 10. Production Considerations
+## Production Considerations
 
 ### Required Practices
 
