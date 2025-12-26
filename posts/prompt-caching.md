@@ -129,6 +129,8 @@ versus
 
 If you embed JSON into text, canonicalize it:
 
+> We use a canonicalized JSON representation with stable key ordering and whitespace-free serialization to ensure tool schemas produce an identical token sequence across requests. This is sufficient for prompt caching, which only requires token-level determinism, not full RFC canonical JSON compliance.
+
 ```python
 import json
 
