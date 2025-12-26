@@ -143,12 +143,20 @@ Treat tool schemas as an API contract: versioned, deterministic, stable. If you 
 
 ## 6. Implementation on OpenAI (Responses API)
 
-Prompt caching is automatic, but production systems require two additional components:
+At this point, the conceptual requirements should be clear: prompt caching only works when requests share an **identical prefix**. The API does not enforce this for you. It simply rewards you when you get it right and silently penalizes you when you don’t.
 
-1. Prompt construction that preserves a reusable prefix
-2. Instrumentation so regressions are detectable
+From an engineering perspective, there are two responsibilities you cannot avoid:
 
-### Logging Cache Usage
+1. **Construct prompts so that reusable content truly remains reusable**
+2. **Measure caching behavior continuously so regressions are visible**
+
+The OpenAI Responses API already supports prompt caching automatically. Your job is to align your prompt construction with the caching model and to verify that reality matches your assumptions.
+
+### 6.1 Instrumentation: treat cache behavior as a first-class signal
+
+Before discussing prompt structure, it’s worth emphasizing instrumentation. Without it, caching failures tend to go unnoticed until costs or latency spike.
+
+OpenAI exposes cache usage directly in the response metadata. A minimal extraction function looks like this:
 
 ```python
 def cache_stats(resp):
@@ -157,6 +165,7 @@ def cache_stats(resp):
     cached = ptd.get("cached_tokens", 0)
     prompt = usage.get("prompt_tokens", 0)
     completion = usage.get("completion_tokens", 0)
+
     return {
         "prompt_tokens": prompt,
         "cached_tokens": cached,
@@ -165,14 +174,32 @@ def cache_stats(resp):
     }
 ```
 
-### Timestamp Placement
+In production, this data should be logged alongside latency (especially time-to-first-token) and request metadata such as agent version and tenant. The pattern you want to see is stability: cache hit rates that remain high across steps of the same agent loop.
+
+If cache hit rate suddenly drops after a deploy, something in your prefix changed—often unintentionally.
+
+
+### 6.2 Prompt construction: why “small” changes have large effects
+
+Most cache regressions come from prompt construction that *looks* harmless.
+
+A common example is timestamps.
+
+From a reasoning perspective, timestamps feel useful: “the model should know the current time.” In practice, most agents do not rely on absolute wall-clock time for decision-making. They operate on task state, not time state.
+
+More importantly, timestamps are **volatile**. If placed in the wrong location, they guarantee a cache miss.
+
+#### Timestamp placement
+
 In practice, agents rarely benefit from including timestamps in the prompt at all. If you have a valid reason to include one, treat it as volatile runtime data and append it at the very end of the prompt so it doesn’t break prefix caching.
 
-Incorrect (modifies prefix on every request):
+Incorrect (timestamp modifies the prefix on every request):
 
 ```python
 prompt = f"now={now_iso}\n" + STATIC_PREFIX + f"\nuser={user_msg}"
 ```
+
+This forces every request to have a unique first token sequence, even if everything else is identical. From the caching system’s perspective, there is nothing to reuse.
 
 Correct (static content first, dynamic content last):
 
@@ -180,12 +207,24 @@ Correct (static content first, dynamic content last):
 prompt = STATIC_PREFIX + f"\nuser={user_msg}\nnow={now_iso}"
 ```
 
-### Routing Affinity and Retention Parameters
+Here, the timestamp exists, but it only affects the suffix. If the rest of the prompt matches a previously cached prefix, the cache remains usable.
 
-OpenAI provides:
+This pattern generalizes beyond timestamps: request IDs, experiment flags, debug metadata, and tracing information should *never* appear in the prefix.
 
-* `prompt_cache_key` to influence routing affinity
-* `prompt_cache_retention` with `in_memory` (default) and optionally `24h` on supported models
+
+
+### 6.3 Routing affinity and cache retention
+
+Prompt caching is not just about matching text; it is also about **where** requests land.
+
+OpenAI uses routing heuristics to place requests on machines that are likely to already hold the relevant cached prefix. You can improve the odds of reuse by providing explicit hints.
+
+Two parameters matter here:
+
+* `prompt_cache_key`: encourages routing affinity for related requests
+* `prompt_cache_retention`: controls how long cached prefixes are retained
+
+A typical use case is multi-tenant or session-based agents, where repeated requests share a stable prefix but may be spaced apart in time.
 
 ```python
 from openai import OpenAI
@@ -197,39 +236,110 @@ resp = client.responses.create(
     tools=ALL_TOOLS,
     input=prompt,
     prompt_cache_key=f"tenant:{tenant_id}",
-    prompt_cache_retention="24h",  # or omit / use "in_memory"
+    prompt_cache_retention="24h",
 )
 
 print(cache_stats(resp))
 ```
 
+Some important nuances:
 
-## 7. Tool Masking Strategies
+* `prompt_cache_key` does not force caching; it biases routing so that requests with the same key are more likely to hit the same cache.
+* Default retention (`in_memory`) is time-limited. If your agent pauses between steps, cached prefixes may be evicted.
+* Extended retention (`24h`, where supported) is often necessary for async workflows, customer support tickets, or long-running agent sessions.
 
-Teams often group tools (`CLI_*`, `MATH_*`, `BILLING_*`) and want to restrict which tools are callable at a given step. A common mistake is implementing this by removing tools dynamically, which changes the prefix and invalidates the cache.
+A useful mental model is to think of the cache as **warm state**, not persistent storage. If you expect reuse across time gaps, you must opt into longer retention.
 
-### Soft Masking (Instruction Based)
 
-This approach is cache friendly but relies on instruction following rather than enforcement:
+### 6.4 The practical test: does Step N reuse Step N−1?
+
+After implementing the above, you should be able to answer one concrete question:
+
+> Is the prompt for step *N* literally the prompt for step *N−1*, with extra text appended?
+
+If the answer is yes, cached tokens should increase monotonically across steps (subject to block granularity). If the answer is no—even for small formatting or ordering differences—caching will degrade.
+
+This is why prompt caching often fails not due to misunderstanding the API, but due to subtle violations of immutability in prompt construction.
+
+
+## 7. Masking Tools on OpenAI: restricting behavior without breaking caching
+
+Tool masking is where many otherwise well-designed agent systems quietly sabotage their cache hit rate.
+
+The motivation is reasonable: at any given step, only a subset of tools is relevant. If the agent is reasoning about billing, you would prefer it not to consider filesystem commands or greeting templates. The naive approach is to remove irrelevant tools from the prompt entirely.
+
+From a caching perspective, this is exactly the wrong thing to do.
+
+### 7.1 Why dynamic tool removal breaks caching
+
+Tool schemas are typically part of the **stable prefix**. They are large, appear early in the prompt, and change rarely by design. This makes them ideal candidates for caching.
+
+If you dynamically remove tools, you are no longer reusing the same prefix. Even if 90% of the tools are unchanged, the serialized tool list is different, and therefore the prefix token stream is different.
+
+The consequence is severe but silent:
+
+* cache hits drop to zero or near zero,
+* latency increases,
+* costs rise,
+* and nothing in the API response tells you *why*.
+
+This is why masking must be implemented **without mutating the tool list**.
+
+
+
+### 7.2 Soft masking: instructing the model, not enforcing it
+
+The simplest approach is to keep all tools in the prompt and instruct the model which ones are currently allowed.
+
+For example:
 
 ```text
-AVAILABLE TOOL GROUPS NOW: BILLING_
-UNAVAILABLE GROUPS: CLI_, MATH_, GREETING_
-Do not call tools from unavailable groups.
+AVAILABLE TOOL GROUPS: BILLING_
+UNAVAILABLE TOOL GROUPS: CLI_, MATH_, GREETING_
+Only call tools from AVAILABLE TOOL GROUPS.
 ```
 
-### Hard Masking (Recommended): `tool_choice` with `allowed_tools`
+This approach has two important properties:
 
-This approach preserves a stable tools list (cache friendly) while restricting the callable subset for the current step.
+1. The tool list remains stable, so prompt caching works.
+2. Enforcement relies on instruction-following rather than guarantees.
 
-Incorrect (invalidates cache):
+Soft masking can be acceptable in exploratory or low-risk contexts, but it has limitations:
+
+* The model may occasionally violate instructions.
+* Safety and correctness depend on prompt quality.
+* There is no hard guarantee that disallowed tools won’t be selected.
+
+For production agent systems, soft masking is often a stepping stone, not the final solution.
+
+
+
+### 7.3 Hard masking with `allowed_tools`: the cache-safe enforcement mechanism
+
+OpenAI provides a mechanism specifically designed to solve this problem: **allowed tools**.
+
+The key idea is simple:
+
+* You always provide the **full, stable set of tools**.
+* At each step, you specify which subset is allowed to be invoked.
+
+This preserves a cacheable prefix while constraining the model’s action space.
+
+#### The anti-pattern (what not to do)
 
 ```python
+# BAD: tool list changes per request
 available = [t for t in ALL_TOOLS if t["name"].startswith("BILLING_")]
-resp = client.responses.create(model="gpt-5.1", tools=available, input="...")
+resp = client.responses.create(
+    model="gpt-5.1",
+    tools=available,
+    input="Investigate duplicate charge."
+)
 ```
 
-Correct (cache friendly):
+Here, the tool list itself changes. From the caching system’s perspective, this is a completely different prompt.
+
+#### The correct pattern
 
 ```python
 def allow_prefix(prefixes):
@@ -241,30 +351,108 @@ def allow_prefix(prefixes):
 
 resp = client.responses.create(
     model="gpt-5.1",
-    tools=ALL_TOOLS,  # Stable, therefore cacheable
+    tools=ALL_TOOLS,  # stable, cacheable
     tool_choice={
         "type": "allowed_tools",
-        "mode": "auto",     # or "required"
+        "mode": "auto",
         "tools": allow_prefix(["BILLING_"]),
     },
-    input="User says they were charged twice for order A123. Investigate and fix.",
+    input="Investigate duplicate charge."
 )
 ```
 
-If the current step requires a tool call (e.g., an executor stage), use `mode: "required"` to enforce a tool call among the allowed subset.
+In this structure:
+
+* The prefix remains identical across steps and sessions.
+* The allowed tool subset is a **runtime constraint**, not a structural change.
+* Cache hits remain intact.
+
+This is the preferred production pattern.
+
+
+
+### 7.4 `auto` vs `required`: choosing the right enforcement level
+
+The `allowed_tools` mechanism supports different modes, and the choice matters.
+
+* `mode: "auto"`
+  The model may call a tool from the allowed set, or respond in natural language.
+
+* `mode: "required"`
+  The model must call one of the allowed tools.
+
+The distinction maps naturally to agent architecture:
+
+* Use **auto** during reasoning or planning phases.
+* Use **required** during executor phases, where a tool call is mandatory.
+
+For example, after determining that a refund is needed, an executor step might look like:
+
+```python
+resp = client.responses.create(
+    model="gpt-5.1",
+    tools=ALL_TOOLS,
+    tool_choice={
+        "type": "allowed_tools",
+        "mode": "required",
+        "tools": allow_prefix(["BILLING_"]),
+    },
+    input="Issue the appropriate refund."
+)
+```
+
+This enforces structure without compromising caching.
+
+
+
+### 7.5 Tool groups as an action-space abstraction
+
+Many mature agent systems group tools by function (`CLI_`, `MATH_`, `BILLING_`, etc.). This is not merely organizational—it enables **step-level action-space control**.
+
+Seen through this lens:
+
+* The full tool list defines the agent’s *capabilities*.
+* Allowed tool subsets define the agent’s *current action space*.
+
+Masking becomes analogous to action masking in reinforcement learning: the agent still knows what actions exist, but only some are legal at a given time.
+
+This framing aligns well with both:
+
+* OpenAI’s `allowed_tools` mechanism, and
+* logit-level masking in self-hosted systems (discussed in the next section).
+
+
+
+### 7.6 The design principle to internalize
+
+If there is one principle to carry forward, it is this:
+
+> **Mask behavior, not structure.**
+
+Structure (tool schemas, order, serialization) must remain stable to enable caching. Behavior (which tools may be used right now) should be controlled through runtime constraints.
+
+Once this distinction is internalized, tool masking stops being a source of cache regressions and becomes a clean, composable part of agent design.
 
 
 ## 8. Logit Level Constraints for Self Hosted Models
 
-On hosted APIs, token level logit manipulation is typically unavailable. On self hosted models, it is possible. This represents the strongest form of masking: disallowed actions receive probability −∞, making them impossible to emit.
+On hosted APIs token level logit manipulation is typically unavailable. You can guide behavior through prompting and API level controls but you cannot directly change the probability assigned to individual tokens.
 
-A common pattern is to have the model emit JSON tool calls:
+In self hosted deployments this limitation disappears. You control the decoding loop which allows direct modification of logits before sampling. This enables the strongest possible form of masking. Disallowed actions are assigned probability minus infinity and therefore cannot be produced by the model. This is a fundamentally different enforcement mechanism.
+
+In API based systems masking constrains what the model is allowed to choose. In self hosted systems logit level masking constrains what the model is able to choose. Instruction based masking assumes cooperation from the model. Even API level constraints such as allowed tools still operate at a semantic level. The model knows that all tools exist but is instructed or guided to only use some of them. Logit level masking removes that ambiguity entirely. From the model’s perspective disallowed actions simply do not exist in the output space. No probability mass is assigned to them and no amount of reasoning can recover them.
+
+This is particularly valuable in self hosted agent systems where tool misuse has real side effects where executor stages must be deterministic or where safety boundaries must be enforced mechanically rather than heuristically.
+
+Many self hosted agent systems adopt a structured output format for tool invocation often JSON. For example
 
 ```json
 {"tool":"CLI_ls","args":{"path":"/var/log"}}
 ```
 
-During generation of the `"tool"` field, you constrain the next token distribution so only allowed tool names remain possible (often via grammar constraints plus a logits processor). A simplified illustration:
+This structure is intentional. It creates a well defined region of the output where action selection occurs. When the model begins emitting the tool field you know exactly which tokens correspond to the action choice. This makes it possible to intervene during decoding and restrict which tool names are valid continuations.
+
+The enforcement does not rely on the model understanding instructions such as do not use a particular tool. It relies on controlling the decoder itself. Below is a simplified illustration using a Hugging Face style logits processor. The goal is to restrict tool selection so that only a predefined set of tool names can be generated once the tool field has begun.
 
 ```python
 import torch
@@ -298,7 +486,16 @@ class AllowedToolNameProcessor(LogitsProcessor):
         return scores
 ```
 
-This is conceptual (real tool names tokenize across multiple tokens), but it captures the principle: the action space is enforced at the decoder rather than relying on instruction following.
+Several clarifications are important. This example is conceptual and not production ready. Real tool names tokenize into multiple tokens. Production systems typically combine grammar constraints token prefix tries and logits processors. The core idea remains unchanged. Illegal continuations are removed from the token distribution before sampling. Once removed they cannot be selected.
+
+Earlier sections discussed grouping tools by prefix such as CLI MATH or BILLING and restricting which groups are valid at a given step. Logit level masking is the natural extension of that idea in self hosted systems. At each step the agent’s capabilities remain unchanged since the full tool set exists. The agent’s legal action space is reduced by masking. That reduction is enforced mechanically at decode time. This mirrors action masking in reinforcement learning. The policy network knows about all actions but only a subset is legal in the current state.
+
+It's worth noting that logit level masking does not interfere with prompt caching. Prompt caching operates on the input tokens that form the prompt prefix. Logit level masking operates on the output distribution during decoding. These mechanisms are orthogonal. 
+
+### 8.1 When logit level masking is justified
+
+Logit level masking introduces additional decoding complexity and engineering overhead. It is typically justified when tool misuse is costly or dangerous when executor stages must be strictly controlled or when determinism and reproducibility matter more than flexibility. For many teams API level constraints such as allowed tools are sufficient. For teams operating self hosted models with tight safety or correctness requirements logit level constraints become a natural next step.
+
 
 
 ## 9. Diagnosing Cache Failures
