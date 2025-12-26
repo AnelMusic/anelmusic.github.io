@@ -434,7 +434,7 @@ Structure (tool schemas, order, serialization) must remain stable to enable cach
 Once this distinction is internalized, tool masking stops being a source of cache regressions and becomes a clean, composable part of agent design.
 
 
-## 8. Logit Level Constraints for Self Hosted Models
+## 8. Logit Level Constraints for Self Hosted Models (Optional)
 
 On hosted APIs token level logit manipulation is typically unavailable. You can guide behavior through prompting and API level controls but you cannot directly change the probability assigned to individual tokens.
 
