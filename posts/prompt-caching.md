@@ -85,7 +85,7 @@ Incorrect approach:
 
 ```python
 tools = fetch_tools_from_db()  # Order may vary
-````
+```
 
 Correct approach:
 
@@ -98,6 +98,9 @@ tools = sorted(fetch_tools_from_db(), key=lambda t: t["name"])  # Deterministic 
 Even with stable ordering, serialization drift breaks prefix matching: key order, whitespace, optional fields, and formatting all affect tokenization.
 
 These are semantically identical but tokenize differently:
+
+
+> Note: The JSON snippets below are illustrative. In the OpenAI API, tool definitions are structured objects (e.g., `type: "function"` with a `function` block containing `name`, `description`, and JSON-Schema `parameters`). The point here is token-level determinism.
 
 ```json
 {"name":"CLI_ls","description":"List files","parameters":{"path":{"type":"string"}}}
@@ -146,8 +149,14 @@ OpenAI exposes cache usage directly in the response metadata. A minimal extracti
 
 ```python
 def cache_stats(resp):
-    usage = resp.usage or {}
-    ptd = usage.get("prompt_tokens_details") or {}
+    # `usage` can be either a dict or a typed SDK object depending on the client/version.
+    usage = getattr(resp, "usage", None) or {}
+
+    # openai-python often returns pydantic models; normalize to a plain dict if needed.
+    if hasattr(usage, "model_dump"):
+        usage = usage.model_dump()
+
+    ptd = (usage.get("prompt_tokens_details") or {})
     cached = ptd.get("cached_tokens", 0)
     prompt = usage.get("prompt_tokens", 0)
     completion = usage.get("completion_tokens", 0)
@@ -243,7 +252,7 @@ After implementing the above, you should be able to answer one concrete question
 
 > Is the prompt for step *N* literally the prompt for step *N−1*, with extra text appended?
 
-If the answer is yes, cached tokens should increase monotonically across steps (subject to block granularity). If the answer is no—even for small formatting or ordering differences—caching will degrade.
+If the answer is yes, you’ll usually see a high (and often growing) cached-token count from step to step. It won’t always increase every time: cached tokens typically move in 128-token increments, may stay flat between increments, and can drop to 0 if the cache is evicted or the request is routed differently. If you see frequent drops to 0, look for small formatting, ordering, or tool-schema changes—caching will degrade.
 
 This is why prompt caching often fails not due to misunderstanding the API, but due to subtle violations of immutability in prompt construction.
 
