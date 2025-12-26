@@ -152,7 +152,6 @@ def cache_stats(resp):
     # `usage` can be either a dict or a typed SDK object depending on the client/version.
     usage = getattr(resp, "usage", None) or {}
 
-    # openai-python often returns pydantic models; normalize to a plain dict if needed.
     if hasattr(usage, "model_dump"):
         usage = usage.model_dump()
 
