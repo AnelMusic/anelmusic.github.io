@@ -59,7 +59,7 @@ A cache-friendly prompt behaves like a program whose header must remain stable. 
 
 **Delta.** The newest observation, tool output, or user message. Runtime controls and timestamps. This content is replaced each step and always appears last.
 
-The strongest version of the rule is this. Step N should be Step N minus one with additional text appended. Nothing edited. Nothing reordered.
+The strongest version of the rule is this. Step N should be Step N-1 with additional text appended. Nothing edited. Nothing reordered.
 
 
 ## Tool Schemas Must Be Token-Identical
