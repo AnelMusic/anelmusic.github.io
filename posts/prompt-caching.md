@@ -51,9 +51,7 @@ OpenAI's documentation states that cached prefixes generally remain active for 5
 
 ## The Architectural Contract
 
-A cache-friendly prompt behaves less like prose and more like a program whose header must remain stable.
-
-If you rewrite earlier sections, even if the meaning is unchanged, you change the token stream and lose the cache match. This implies an architectural contract with three layers.
+A cache-friendly prompt behaves like a program whose header must remain stable. If you rewrite earlier sections, even if the meaning is unchanged, you change the token stream and lose the cache match. This implies an architectural contract with three layers.
 
 **Stable prefix.** System instructions, policies, tool schemas, and examples. This content never changes between requests.
 
