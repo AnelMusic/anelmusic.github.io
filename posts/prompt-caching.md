@@ -25,9 +25,7 @@ Consider a customer support agent handling a "I was charged twice" ticket.
 4. Call `BILLING_initiate_refund`
 5. Compose the final customer-facing response
 
-Five model calls for a routine ticket. Production systems that include planner and executor separation, verification steps, guardrails, retries, and escalation heuristics routinely hit 20 to 50 calls for complex tasks.
-
-The arithmetic is stark. If your prefix is 2,000 tokens and you make 30 calls, you are processing 60,000 input tokens. With caching, you process 2,000 tokens once and pay a fraction of that cost for the remaining 29 calls. Without caching, you pay full price every time.
+Five model calls for a routine ticket. Production systems that include planner and executor separation, verification steps, guardrails, retries, and escalation heuristics routinely hit 20 to 50 calls for complex tasks. If your prefix is 2,000 tokens and you make 30 calls, you are processing 60,000 input tokens. With caching, you process 2,000 tokens once and pay a fraction (usually 10X) of that cost for the remaining 29 calls. Without caching, you pay full price every time.
 
 The new information per step is usually small. A tool result. An observation. A user message. The prefix, however, remains large. Instructions, policies, tool schemas. This is precisely the regime prompt caching is designed for.
 
