@@ -6,7 +6,7 @@ Agentic AI systems have a cost structure problem that prompt caching solves eleg
 
 Unlike single-turn chat, where an inefficient prompt costs you once, agentic systems pay the same tax on every iteration. A customer support agent resolving a billing dispute might make five model calls. A code assistant debugging an error might make twenty. Each call reprocesses the same instructions, policies, and tool definitions before touching the actual work.
 
-Prompt caching eliminates this redundancy. When consecutive requests share an identical token prefix, the inference provider can reuse previously computed attention states rather than recomputing them from scratch. The result is lower latency, lower cost, and a scaling curve that finally makes economic sense.
+Prompt caching eliminates this redundancy. When consecutive requests share an identical token prefix, the inference provider can reuse previously computed attention states rather than recomputing them from scratch. The result is lower latency and lower cost.
 
 But caching has a hard requirement that is easy to violate. Cache hits demand exact prefix matches. One timestamp in the wrong place, one tool schema that serializes differently, and you are back to paying full price on every call. Often you will not even realize it.
 
