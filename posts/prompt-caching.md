@@ -109,13 +109,9 @@ Treat tool schemas as an API contract. Versioned, deterministic, and stable. If 
 
 ## Implementation Patterns
 
-The conceptual requirements should now be clear. Prompt caching only works when requests share an identical prefix. The API does not enforce this for you. It rewards you when you get it right and silently penalizes you when you do not.
+The conceptual requirements should now be clear. Prompt caching only works when requests share an identical prefix. The API does not enforce this for you. It rewards you when you get it right and silently penalizes you when you do not. From an engineering perspective, you have two responsibilities.
 
-From an engineering perspective, you have two responsibilities.
-
-First, construct prompts so that reusable content truly remains reusable.
-
-Second, measure caching behavior continuously so regressions are visible.
+First, construct prompts so that reusable content truly remains reusable. Second, measure caching behavior continuously so regressions are visible.
 
 ### Instrumentation
 
@@ -149,13 +145,7 @@ If cache hit rate suddenly drops after a deploy, something in your prefix change
 
 ### Timestamps and Other Volatile Fields
 
-Most cache regressions come from prompt construction that looks harmless.
-
-Timestamps are the most common culprit.
-
-From a reasoning perspective, timestamps feel useful. The model should know the current time. In practice, most agents do not rely on absolute wall-clock time for decision-making. They operate on task state, not time state.
-
-More importantly, timestamps are volatile. Placed in the wrong location, they guarantee a cache miss.
+Most cache regressions come from prompt construction that looks harmless. Timestamps are the most common pitfall. From a reasoning perspective, timestamps might feel useful but in practice, most agents do not rely on absolute wall-clock time for decision-making. They operate on task state, not time state. More importantly, timestamps are volatile. Placed in the wrong location, they guarantee a cache miss.
 
 ```python
 # Wrong because the timestamp contaminates the prefix
@@ -169,11 +159,7 @@ This pattern generalizes. Request IDs, experiment flags, debug metadata, and tra
 
 ### Routing Affinity and Extended Retention
 
-Prompt caching is not just about matching text. It is also about where requests land.
-
-OpenAI uses routing heuristics to place requests on machines that are likely to already hold the relevant cached prefix. You can improve the odds of reuse by providing explicit hints.
-
-Two parameters matter here.
+Prompt caching is not just about matching text. It is also about where requests land. OpenAI uses routing heuristics to place requests on machines that are likely to already hold the relevant cached prefix. You can improve the odds of reuse by providing explicit hints. Two parameters matter here.
 
 The `prompt_cache_key` parameter encourages routing affinity for related requests.
 
@@ -195,22 +181,13 @@ resp = client.responses.create(
 print(cache_stats(resp))
 ```
 
-The `prompt_cache_key` does not force caching. It biases routing so that requests with the same key are more likely to hit the same cache.
-
-Default retention is time-limited. If your agent pauses between steps, cached prefixes may be evicted.
-
-Extended retention, where supported, is often necessary for async workflows, customer support tickets, or long-running agent sessions.
-
-Think of the cache as warm state rather than persistent storage. If you expect reuse across time gaps, you must opt into longer retention.
-
+The `prompt_cache_key` does not force caching. It biases routing so that requests with the same key are more likely to hit the same cache. Default retention is time-limited. If your agent pauses between steps, cached prefixes may be evicted. Extended retention, where supported, is often necessary for async workflows, customer support tickets, or long-running agent sessions. Think of the cache as warm state rather than persistent storage. If you expect reuse across time gaps, you must opt into longer retention.
 
 ## Tool Masking Without Breaking Caching
 
 Tool masking is where many otherwise well-designed agent systems quietly sabotage their cache hit rate.
 
-The motivation is reasonable. At any given step, only a subset of tools is relevant. If the agent is reasoning about billing, you would prefer it not consider filesystem commands or greeting templates. The naive approach is to remove irrelevant tools from the prompt entirely.
-
-From a caching perspective, this is exactly wrong.
+The motivation is reasonable. At any given step, only a subset of tools is relevant. If the agent is reasoning about billing, you would prefer it not consider filesystem commands or greeting templates. The naive approach is to remove irrelevant tools from the prompt entirely. From a caching perspective, this is exactly wrong.
 
 ### Why Dynamic Tool Removal Fails
 
@@ -278,22 +255,13 @@ The prefix remains identical across steps and sessions. The allowed tool subset 
 
 ### Auto versus Required Mode
 
-The `allowed_tools` mechanism supports different modes.
-
-In auto mode, the model may call a tool from the allowed set or respond in natural language.
-
-In required mode, the model must call one of the allowed tools.
-
-Use auto during reasoning or planning phases. Use required during executor phases where a tool call is mandatory.
+The `allowed_tools` mechanism supports different modes. In auto mode, the model may call a tool from the allowed set or respond in natural language. In required mode, the model must call one of the allowed tools. Use auto during reasoning or planning phases. Use required during executor phases where a tool call is mandatory.
 
 ### The Principle
 
 If there is one principle to carry forward, it is this. Mask behavior, not structure.
 
-Structure, meaning tool schemas, order, and serialization, must remain stable to enable caching. Behavior, meaning which tools may be used right now, should be controlled through runtime constraints.
-
-Once this distinction is internalized, tool masking stops being a source of cache regressions and becomes a clean, composable part of agent design.
-
+Structure, meaning tool schemas, order, and serialization, must remain stable to enable caching. Behavior, meaning which tools may be used right now, should be controlled through runtime constraints. Once this distinction is internalized, tool masking stops being a source of cache regressions and becomes a clean, composable part of agent design.
 
 ## Logit-Level Constraints for Self-Hosted Models
 
