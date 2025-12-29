@@ -1,161 +1,140 @@
 # Prompt Caching for Agentic Systems
-> This guide uses OpenAI's implementation as the primary reference, but the underlying principles and techniques are applicable to other model providers offering similar caching mechanisms (e.g., Anthropic, Google, and various self hosted inference frameworks). 
 
-Agentic systems repeatedly send the same lengthy prefix (system prompt, tool schemas, policies, few shot examples) and modify only a small suffix (latest observation, tool output, user message). This characteristic makes such systems particularly sensitive to prompt prefill costs and latency, as the same "program header" is reprocessed on every step. Fortunately, when requests share an exact prompt prefix, the inference provider can reuse previously computed attention key/value tensors for that prefix, thereby reducing both latency (time to first token) and input cost on subsequent calls. On OpenAI specifically, prompt caching activates once the prompt reaches 1,024 tokens, and the cached prefix extends in 128 token increments as longer prefixes are reused. Other providers may have different thresholds, but the core mechanism remains the same.
+> This guide uses OpenAI's implementation as the primary reference, but the underlying principles apply to any provider offering similar caching mechanisms, including Anthropic, Google, and various self-hosted inference frameworks.
 
+Agentic AI systems have a cost structure problem that prompt caching solves elegantly, provided you understand the contract it requires.
 
+Unlike single-turn chat, where an inefficient prompt costs you once, agentic systems pay the same tax on every iteration. A customer support agent resolving a billing dispute might make five model calls. A code assistant debugging an error might make twenty. Each call reprocesses the same instructions, policies, and tool definitions before touching the actual work.
 
-## Overview
+Prompt caching eliminates this redundancy. When consecutive requests share an identical token prefix, the inference provider can reuse previously computed attention states rather than recomputing them from scratch. The result is lower latency, lower cost, and a scaling curve that finally makes economic sense.
 
-Prompt caching has a single hard requirement:
+But caching has a hard requirement that is easy to violate. Cache hits demand exact prefix matches. One timestamp in the wrong place, one tool schema that serializes differently, and you are back to paying full price on every call. Often you will not even realize it.
 
-**Cache hits require exact prefix matches.** Static content must appear first and dynamic content must appear last. This principle applies to tool definitions as well: if tool schemas differ between requests, that portion cannot be cached.
-
-In production, one metric summarizes whether your architecture is behaving correctly:
-
-> **How many prompt tokens were served from cache?**
-
-OpenAI exposes this as `usage.prompt_tokens_details.cached_tokens`. Requests below the threshold will still display the field, but it will simply be zero.
-
-Key thresholds:
-
-* Prompt caching applies automatically for prompts **≥ 1024 tokens**.
-* The cached prefix length grows in **128 token increments**.
-
-If the cached fraction is high and stable, your agent architecture can scale economically. If it is low or volatile, you are paying repeated prefill cost on every step, often without realizing it.
+This guide covers how to design agent architectures that maintain cache eligibility across steps, how to measure whether you are actually getting cache hits, and how to diagnose the subtle failures that silently destroy your economics.
 
 
-## Cost Implications for Agentic Architectures
+## The Economics of Iteration
 
-Single turn chat systems can be surprisingly tolerant of inefficiency. Including a large system prompt or verbose policy section may result in only a mild cost increase. Agentic systems, however, are not tolerant of such inefficiency because they operate iteratively. Consider SomeRandomCompanySupport, which handles "I was charged twice" tickets. A typical resolution involves not one call but a loop:
+Single-turn chat can absorb a bloated prompt because you pay once and move on. Agentic systems cannot afford that tolerance because they operate in loops.
 
-1. Read ticket and conversation context, decide next action
+Consider a customer support agent handling a "I was charged twice" ticket.
+
+1. Read the ticket and conversation context, then decide the next action
 2. Call `BILLING_lookup_invoice`
-3. Incorporate tool output, decide refund versus explanation
-4. Possibly call `BILLING_initiate_refund`
-5. Produce final customer facing response
+3. Incorporate the tool output, then decide between refund and explanation
+4. Call `BILLING_initiate_refund`
+5. Compose the final customer-facing response
 
-Even this relatively simple ticket requires 3 to 5 model calls. Real agent stacks include additional passes (planner/executor separation, verification steps, guardrails, retries, escalation heuristics) and can easily reach 20 to 50 calls for a complex task.
+Five model calls for a routine ticket. Production systems that include planner and executor separation, verification steps, guardrails, retries, and escalation heuristics routinely hit 20 to 50 calls for complex tasks.
 
-The critical observation is that the new information per step is usually small (a tool result, an observation), while the prefix remains large (instructions, policies, tool schemas). Without caching, the prefill cost is paid repeatedly for the same prefix. With caching, the prefill cost is amortized across steps. This is precisely the regime prompt caching is designed for.
+The arithmetic is stark. If your prefix is 2,000 tokens and you make 30 calls, you are processing 60,000 input tokens. With caching, you process 2,000 tokens once and pay a fraction of that cost for the remaining 29 calls. Without caching, you pay full price every time.
+
+The new information per step is usually small. A tool result. An observation. A user message. The prefix, however, remains large. Instructions, policies, tool schemas. This is precisely the regime prompt caching is designed for.
 
 
-## Mechanism of Prompt Caching
+## How Prompt Caching Works
 
-Two concepts are often conflated:
+Before diving into implementation, it helps to clarify what prompt caching actually is, because it is often confused with something else.
 
-* KV caching within a single generation (standard transformer decoding optimization)
-* Prompt caching across requests (cross request reuse of the prefill computation)
+KV caching is a standard transformer optimization that reuses key-value states within a single generation. This happens automatically during decoding and you do not control it.
+
+Prompt caching reuses computation across requests. When two requests share an identical prefix, the provider skips recomputing attention for that prefix and starts from the cached state.
 
 This guide concerns the latter.
 
-OpenAI's prompt caching stores the **longest previously computed prefix**, starting at 1,024 tokens and extending in 128 token increments. If a subsequent request begins with that same token sequence, OpenAI can reuse the cached computation for that prefix and compute only the new suffix.
+OpenAI stores the longest previously computed prefix, starting at 1,024 tokens and extending in 128-token increments. If your next request begins with the same token sequence, OpenAI reuses the cached computation and processes only the new suffix.
 
 ### Cache Retention and Eviction
 
-Default caching is in memory and therefore time sensitive. If there is a long pause between steps, cached prefixes can be evicted. For workloads with pauses (support tickets, asynchronous agent workflows), extended retention is often the difference between occasional benefit and reliable benefit. As per OpenAI:
-> When using the in-memory policy, cached prefixes generally remain active for 5 to 10 minutes of inactivity, up to a maximum of one hour. Extended prompt cache retention keeps cached prefixes active for longer, up to a maximum of 24 hours but is available only for certain models.
+Default caching is in-memory and therefore time-sensitive. If there is a long pause between steps, cached prefixes can be evicted. For workloads with pauses, such as support tickets or asynchronous agent workflows, extended retention is often the difference between occasional benefit and reliable benefit.
 
-## The Cache Contract: Prefix Stability and Append Only Semantics
-
-A cache friendly prompt behaves less like a narrative and more like a program whose header must remain stable.
-
-If you rewrite earlier sections (even if the meaning is unchanged), you change the token stream and lose the cache match. In practice, this implies an architectural contract:
-
-* **Stable prefix**: system instructions, policies, tool schemas, examples
-* **Append only context**: conversation turns, tool outputs, summaries
-* **Delta** (always last): newest observation, tool output, or user message; runtime controls, timestamps
-
-The strongest version of the rule is:
-
-> Step N should be Step N−1 plus appended text.
+OpenAI's documentation states that cached prefixes generally remain active for 5 to 10 minutes of inactivity when using the in-memory policy, with a maximum of one hour. Extended prompt cache retention keeps cached prefixes active longer, up to 24 hours, but is available only for certain models.
 
 
-## Determinism in Tool Schema Definitions
+## The Architectural Contract
 
-Tools can benefit from prompt caching only if their definitions are **identical** between the requests that are expected to share cached prefixes. "Identical" is not semantic equivalence. It is literal token level identity.
+A cache-friendly prompt behaves less like prose and more like a program whose header must remain stable.
 
-"Stable tool schemas" means your tool definitions must produce the same token stream on every request. This requires both stable ordering and stable serialization. Nondeterministic ordering and serialization are frequently overlooked reasons for cache failure.
+If you rewrite earlier sections, even if the meaning is unchanged, you change the token stream and lose the cache match. This implies an architectural contract with three layers.
+
+**Stable prefix.** System instructions, policies, tool schemas, and examples. This content never changes between requests.
+
+**Append-only context.** Conversation turns, tool outputs, and summaries. This content grows monotonically but is never edited.
+
+**Delta.** The newest observation, tool output, or user message. Runtime controls and timestamps. This content is replaced each step and always appears last.
+
+The strongest version of the rule is this. Step N should be Step N-1 with additional text appended. Nothing edited. Nothing reordered.
+
+
+## Tool Schemas Must Be Token-Identical
+
+Tools can benefit from caching only if their definitions produce the exact same token stream on every request. Identical here means literal token identity, not semantic equivalence.
+
+This has two implications that are easy to miss.
 
 ### Stable Ordering
 
-If the tools appear as `[A, B, C]` in one request and `[B, A, C]` in another, the prefix differs.
-
-Incorrect approach:
+If tools appear as `[A, B, C]` in one request and `[B, A, C]` in another, the prefix differs and caching fails.
 
 ```python
-tools = fetch_tools_from_db()  # Order may vary
-```
+# Wrong because order depends on database or dict iteration
+tools = fetch_tools_from_db()
 
-Correct approach:
-
-```python
-tools = sorted(fetch_tools_from_db(), key=lambda t: t["name"])  # Deterministic order
+# Right because ordering is explicit
+tools = sorted(fetch_tools_from_db(), key=lambda t: t["name"])
 ```
 
 ### Stable Serialization
 
-Even with stable ordering, serialization drift breaks prefix matching: key order, whitespace, optional fields, and formatting all affect tokenization.
+Even with stable ordering, key order, whitespace, and formatting affect tokenization.
 
-These are semantically identical but tokenize differently:
-
-
-> Note: The JSON snippets below are illustrative. In the OpenAI API, tool definitions are structured objects (e.g., `type: "function"` with a `function` block containing `name`, `description`, and JSON-Schema `parameters`). The point here is token-level determinism.
+These two JSON objects are semantically identical but tokenize differently.
 
 ```json
-{"name":"CLI_ls","description":"List files","parameters":{"path":{"type":"string"}}}
+{"name":"CLI_ls","description":"List files"}
 ```
-
-versus
 
 ```json
 {
   "description": "List files",
-  "parameters": { "path": { "type": "string" } },
   "name": "CLI_ls"
 }
 ```
 
-If you embed JSON into text, canonicalize it:
-
-> We use a canonicalized JSON representation with stable key ordering and whitespace-free serialization to ensure tool schemas produce an identical token sequence across requests. This is sufficient for prompt caching, which only requires token-level determinism, not full RFC canonical JSON compliance.
+If you embed JSON in prompts, canonicalize it.
 
 ```python
-import json
-
-def canonical_json(obj) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+def canonical_json(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ";"))
 ```
 
-Treat tool schemas as an API contract: versioned, deterministic, stable. If you must modify tool definitions, do so as a deliberate version increment and accept that you are warming a new cache.
+Treat tool schemas as an API contract. Versioned, deterministic, and stable. If you must modify them, do so as a deliberate version increment and accept that you are warming a new cache.
 
 
-## Implementation on OpenAI (Responses API)
+## Implementation Patterns
 
-At this point, the conceptual requirements should be clear: prompt caching only works when requests share an **identical prefix**. The API does not enforce this for you. It simply rewards you when you get it right and silently penalizes you when you don’t.
+The conceptual requirements should now be clear. Prompt caching only works when requests share an identical prefix. The API does not enforce this for you. It rewards you when you get it right and silently penalizes you when you do not.
 
-From an engineering perspective, there are two responsibilities you cannot avoid:
+From an engineering perspective, you have two responsibilities.
 
-1. **Construct prompts so that reusable content truly remains reusable**
-2. **Measure caching behavior continuously so regressions are visible**
+First, construct prompts so that reusable content truly remains reusable.
 
-The OpenAI Responses API already supports prompt caching automatically. Your job is to align your prompt construction with the caching model and to verify that reality matches your assumptions.
+Second, measure caching behavior continuously so regressions are visible.
 
-### 6.1 Instrumentation: treat cache behavior as a first-class signal
+### Instrumentation
 
-Before discussing prompt structure, it’s worth emphasizing instrumentation. Without it, caching failures tend to go unnoticed until costs or latency spike.
+Before discussing prompt structure, instrumentation deserves emphasis. Without it, caching failures tend to go unnoticed until costs or latency spike.
 
-OpenAI exposes cache usage directly in the response metadata. A minimal extraction function looks like this:
+OpenAI exposes cache usage directly in the response metadata. A minimal extraction function looks like this.
 
 ```python
 def cache_stats(resp):
-    # `usage` can be either a dict or a typed SDK object depending on the client/version.
     usage = getattr(resp, "usage", None) or {}
 
     if hasattr(usage, "model_dump"):
         usage = usage.model_dump()
 
-    ptd = (usage.get("prompt_tokens_details") or {})
+    ptd = usage.get("prompt_tokens_details") or {}
     cached = ptd.get("cached_tokens", 0)
     prompt = usage.get("prompt_tokens", 0)
     completion = usage.get("completion_tokens", 0)
@@ -168,57 +147,41 @@ def cache_stats(resp):
     }
 ```
 
-In production, this data should be logged alongside latency (especially time-to-first-token) and request metadata such as agent version and tenant. The pattern you want to see is stability: cache hit rates that remain high across steps of the same agent loop.
+In production, log this data alongside latency, especially time to first token, and request metadata such as agent version and tenant. The pattern you want to see is stability. Cache hit rates that remain high across steps of the same agent loop.
 
-If cache hit rate suddenly drops after a deploy, something in your prefix changed—often unintentionally.
+If cache hit rate suddenly drops after a deploy, something in your prefix changed. Often unintentionally.
 
+### Timestamps and Other Volatile Fields
 
-### Prompt construction: why “small” changes have large effects
+Most cache regressions come from prompt construction that looks harmless.
 
-Most cache regressions come from prompt construction that *looks* harmless.
+Timestamps are the most common culprit.
 
-A common example is timestamps.
+From a reasoning perspective, timestamps feel useful. The model should know the current time. In practice, most agents do not rely on absolute wall-clock time for decision-making. They operate on task state, not time state.
 
-From a reasoning perspective, timestamps feel useful: “the model should know the current time.” In practice, most agents do not rely on absolute wall-clock time for decision-making. They operate on task state, not time state.
-
-More importantly, timestamps are **volatile**. If placed in the wrong location, they guarantee a cache miss.
-
-#### Timestamp placement
-
-In practice, agents rarely benefit from including timestamps in the prompt at all. If you have a valid reason to include one, treat it as volatile runtime data and append it at the very end of the prompt so it doesn’t break prefix caching.
-
-Incorrect (timestamp modifies the prefix on every request):
+More importantly, timestamps are volatile. Placed in the wrong location, they guarantee a cache miss.
 
 ```python
-prompt = f"now={now_iso}\n" + STATIC_PREFIX + f"\nuser={user_msg}"
+# Wrong because the timestamp contaminates the prefix
+prompt = f"now={now_iso}\n" + STATIC_PREFIX + user_msg
+
+# Right because the timestamp only affects the suffix
+prompt = STATIC_PREFIX + user_msg + f"\nnow={now_iso}"
 ```
 
-This forces every request to have a unique first token sequence, even if everything else is identical. From the caching system’s perspective, there is nothing to reuse.
+This pattern generalizes. Request IDs, experiment flags, debug metadata, and tracing information should never appear in the prefix.
 
-Correct (static content first, dynamic content last):
+### Routing Affinity and Extended Retention
 
-```python
-prompt = STATIC_PREFIX + f"\nuser={user_msg}\nnow={now_iso}"
-```
-
-Here, the timestamp exists, but it only affects the suffix. If the rest of the prompt matches a previously cached prefix, the cache remains usable.
-
-This pattern generalizes beyond timestamps: request IDs, experiment flags, debug metadata, and tracing information should *never* appear in the prefix.
-
-
-
-### Routing affinity and cache retention
-
-Prompt caching is not just about matching text; it is also about **where** requests land.
+Prompt caching is not just about matching text. It is also about where requests land.
 
 OpenAI uses routing heuristics to place requests on machines that are likely to already hold the relevant cached prefix. You can improve the odds of reuse by providing explicit hints.
 
-Two parameters matter here:
+Two parameters matter here.
 
-* `prompt_cache_key`: encourages routing affinity for related requests
-* `prompt_cache_retention`: controls how long cached prefixes are retained
+The `prompt_cache_key` parameter encourages routing affinity for related requests.
 
-A typical use case is multi-tenant or session-based agents, where repeated requests share a stable prefix but may be spaced apart in time.
+The `prompt_cache_retention` parameter controls how long cached prefixes are retained.
 
 ```python
 from openai import OpenAI
@@ -229,100 +192,62 @@ resp = client.responses.create(
     instructions=STATIC_INSTRUCTIONS,
     tools=ALL_TOOLS,
     input=prompt,
-    prompt_cache_key=f"tenant:{tenant_id}",
+    prompt_cache_key=f"tenant_{tenant_id}",
     prompt_cache_retention="24h",
 )
 
 print(cache_stats(resp))
 ```
 
-Some important nuances:
+The `prompt_cache_key` does not force caching. It biases routing so that requests with the same key are more likely to hit the same cache.
 
-* `prompt_cache_key` does not force caching; it biases routing so that requests with the same key are more likely to hit the same cache.
-* Default retention (`in_memory`) is time-limited. If your agent pauses between steps, cached prefixes may be evicted.
-* Extended retention (`24h`, where supported) is often necessary for async workflows, customer support tickets, or long-running agent sessions.
+Default retention is time-limited. If your agent pauses between steps, cached prefixes may be evicted.
 
-A useful mental model is to think of the cache as **warm state**, not persistent storage. If you expect reuse across time gaps, you must opt into longer retention.
+Extended retention, where supported, is often necessary for async workflows, customer support tickets, or long-running agent sessions.
 
-
-### The practical test: does Step N reuse Step N−1?
-
-After implementing the above, you should be able to answer one concrete question:
-
-> Is the prompt for step *N* literally the prompt for step *N−1*, with extra text appended?
-
-If the answer is yes, you’ll usually see a high (and often growing) cached-token count from step to step. It won’t always increase every time: cached tokens typically move in 128-token increments, may stay flat between increments, and can drop to 0 if the cache is evicted or the request is routed differently. If you see frequent drops to 0, look for small formatting, ordering, or tool-schema changes—caching will degrade.
-
-This is why prompt caching often fails not due to misunderstanding the API, but due to subtle violations of immutability in prompt construction.
+Think of the cache as warm state rather than persistent storage. If you expect reuse across time gaps, you must opt into longer retention.
 
 
-## Masking Tools on OpenAI: restricting behavior without breaking caching
+## Tool Masking Without Breaking Caching
 
 Tool masking is where many otherwise well-designed agent systems quietly sabotage their cache hit rate.
 
-The motivation is reasonable: at any given step, only a subset of tools is relevant. If the agent is reasoning about billing, you would prefer it not to consider filesystem commands or greeting templates. The naive approach is to remove irrelevant tools from the prompt entirely.
+The motivation is reasonable. At any given step, only a subset of tools is relevant. If the agent is reasoning about billing, you would prefer it not consider filesystem commands or greeting templates. The naive approach is to remove irrelevant tools from the prompt entirely.
 
-From a caching perspective, this is exactly the wrong thing to do.
+From a caching perspective, this is exactly wrong.
 
-### Why dynamic tool removal breaks caching
+### Why Dynamic Tool Removal Fails
 
-Tool schemas are typically part of the **stable prefix**. They are large, appear early in the prompt, and change rarely by design. This makes them ideal candidates for caching.
+Tool schemas are typically part of the stable prefix. They are large, appear early in the prompt, and change rarely by design. This makes them ideal candidates for caching.
 
-If you dynamically remove tools, you are no longer reusing the same prefix. Even if 90% of the tools are unchanged, the serialized tool list is different, and therefore the prefix token stream is different.
+If you dynamically remove tools, you are no longer reusing the same prefix. Even if 90 percent of the tools are unchanged, the serialized tool list is different and therefore the prefix token stream is different.
 
-The consequence is severe but silent:
+The consequence is severe but silent. Cache hits drop to zero or near zero. Latency increases. Costs rise. Nothing in the API response tells you why.
 
-* cache hits drop to zero or near zero,
-* latency increases,
-* costs rise,
-* and nothing in the API response tells you *why*.
-
-This is why masking must be implemented **without mutating the tool list**.
-
-
-
-### Soft masking: instructing the model, not enforcing it
+### Soft Masking
 
 The simplest approach is to keep all tools in the prompt and instruct the model which ones are currently allowed.
 
-For example:
-
-```text
-AVAILABLE TOOL GROUPS: BILLING_
-UNAVAILABLE TOOL GROUPS: CLI_, MATH_, GREETING_
+```
+AVAILABLE TOOL GROUPS consist of BILLING_
+UNAVAILABLE TOOL GROUPS consist of CLI_, MATH_, GREETING_
 Only call tools from AVAILABLE TOOL GROUPS.
 ```
 
-This approach has two important properties:
+This approach has two properties. The tool list remains stable so prompt caching works. Enforcement relies on instruction-following rather than guarantees.
 
-1. The tool list remains stable, so prompt caching works.
-2. Enforcement relies on instruction-following rather than guarantees.
+Soft masking can be acceptable in exploratory or low-risk contexts. For production agent systems, it is often a stepping stone rather than the final solution.
 
-Soft masking can be acceptable in exploratory or low-risk contexts, but it has limitations:
+### Hard Masking with allowed_tools
 
-* The model may occasionally violate instructions.
-* Safety and correctness depend on prompt quality.
-* There is no hard guarantee that disallowed tools won’t be selected.
+OpenAI provides a mechanism specifically designed to solve this problem.
 
-For production agent systems, soft masking is often a stepping stone, not the final solution.
+You always provide the full stable set of tools. At each step, you specify which subset is allowed to be invoked. This preserves a cacheable prefix while constraining the model's action space.
 
-
-
-### Hard masking with `allowed_tools`: the cache-safe enforcement mechanism
-
-OpenAI provides a mechanism specifically designed to solve this problem: **allowed tools**.
-
-The key idea is simple:
-
-* You always provide the **full, stable set of tools**.
-* At each step, you specify which subset is allowed to be invoked.
-
-This preserves a cacheable prefix while constraining the model’s action space.
-
-#### The anti-pattern 
+The anti-pattern looks like this.
 
 ```python
-# BAD: tool list changes per request
+# Wrong because the tool list changes per request
 available = [t for t in ALL_TOOLS if t["name"].startswith("BILLING_")]
 resp = client.responses.create(
     model="gpt-5.1",
@@ -331,9 +256,7 @@ resp = client.responses.create(
 )
 ```
 
-Here, the tool list itself changes. From the caching system’s perspective, this is a completely different prompt.
-
-#### The correct pattern
+The correct pattern looks like this.
 
 ```python
 def allow_prefix(prefixes):
@@ -345,7 +268,7 @@ def allow_prefix(prefixes):
 
 resp = client.responses.create(
     model="gpt-5.1",
-    tools=ALL_TOOLS,  # stable, cacheable
+    tools=ALL_TOOLS,  # stable and cacheable
     tool_choice={
         "type": "allowed_tools",
         "mode": "auto",
@@ -355,98 +278,44 @@ resp = client.responses.create(
 )
 ```
 
-In this structure:
+The prefix remains identical across steps and sessions. The allowed tool subset is a runtime constraint rather than a structural change. Cache hits remain intact.
 
-* The prefix remains identical across steps and sessions.
-* The allowed tool subset is a **runtime constraint**, not a structural change.
-* Cache hits remain intact.
+### Auto versus Required Mode
 
-This is the preferred production pattern.
+The `allowed_tools` mechanism supports different modes.
 
+In auto mode, the model may call a tool from the allowed set or respond in natural language.
 
+In required mode, the model must call one of the allowed tools.
 
-### `auto` vs `required`: choosing the right enforcement level
+Use auto during reasoning or planning phases. Use required during executor phases where a tool call is mandatory.
 
-The `allowed_tools` mechanism supports different modes, and the choice matters.
+### The Principle
 
-* `mode: "auto"`
-  The model may call a tool from the allowed set, or respond in natural language.
+If there is one principle to carry forward, it is this. Mask behavior, not structure.
 
-* `mode: "required"`
-  The model must call one of the allowed tools.
-
-The distinction maps naturally to agent architecture:
-
-* Use **auto** during reasoning or planning phases.
-* Use **required** during executor phases, where a tool call is mandatory.
-
-For example, after determining that a refund is needed, an executor step might look like:
-
-```python
-resp = client.responses.create(
-    model="gpt-5.1",
-    tools=ALL_TOOLS,
-    tool_choice={
-        "type": "allowed_tools",
-        "mode": "required",
-        "tools": allow_prefix(["BILLING_"]),
-    },
-    input="Issue the appropriate refund."
-)
-```
-
-This enforces structure without compromising caching.
-
-
-
-### Tool groups as an action-space abstraction
-
-Many mature agent systems group tools by function (`CLI_`, `MATH_`, `BILLING_`, etc.). This is not merely organizational—it enables **step-level action-space control**.
-
-Seen through this lens:
-
-* The full tool list defines the agent’s *capabilities*.
-* Allowed tool subsets define the agent’s *current action space*.
-
-Masking becomes analogous to action masking in reinforcement learning: the agent still knows what actions exist, but only some are legal at a given time.
-
-This framing aligns well with both:
-
-* OpenAI’s `allowed_tools` mechanism, and
-* logit-level masking in self-hosted systems (discussed in the next section).
-
-
-
-### The design principle to internalize
-
-If there is one principle to carry forward, it is this:
-
-> **Mask behavior, not structure.**
-
-Structure (tool schemas, order, serialization) must remain stable to enable caching. Behavior (which tools may be used right now) should be controlled through runtime constraints.
+Structure, meaning tool schemas, order, and serialization, must remain stable to enable caching. Behavior, meaning which tools may be used right now, should be controlled through runtime constraints.
 
 Once this distinction is internalized, tool masking stops being a source of cache regressions and becomes a clean, composable part of agent design.
 
 
-## Logit Level Constraints for Self Hosted Models (Optional)
+## Logit-Level Constraints for Self-Hosted Models
 
-On hosted APIs token level logit manipulation is typically unavailable. You can guide behavior through prompting and API level controls but you cannot directly change the probability assigned to individual tokens.
+Skip this section if you use hosted APIs like OpenAI or Anthropic. It applies only to self-hosted deployments where you control the decoding loop.
 
-In self hosted deployments this limitation disappears. You control the decoding loop which allows direct modification of logits before sampling. This enables the strongest possible form of masking. Disallowed actions are assigned probability minus infinity and therefore cannot be produced by the model. This is a fundamentally different enforcement mechanism.
+In self-hosted systems, you can enforce tool restrictions at a level impossible with APIs. You modify the logit distribution directly before sampling. Disallowed tokens receive probability negative infinity. From the model's perspective, those actions do not exist in the output space.
 
-In API based systems masking constrains what the model is allowed to choose. In self hosted systems logit level masking constrains what the model is able to choose. Instruction based masking assumes cooperation from the model. Even API level constraints such as allowed tools still operate at a semantic level. The model knows that all tools exist but is instructed or guided to only use some of them. Logit level masking removes that ambiguity entirely. From the model’s perspective disallowed actions simply do not exist in the output space. No probability mass is assigned to them and no amount of reasoning can recover them.
+This is fundamentally different from instruction-based masking. API-level constraints such as `allowed_tools` still operate at a semantic level. The model knows all tools exist but is guided to use only some of them. Logit-level masking removes that ambiguity entirely. No probability mass is assigned to disallowed actions and no amount of reasoning can recover them.
 
-This is particularly valuable in self hosted agent systems where tool misuse has real side effects where executor stages must be deterministic or where safety boundaries must be enforced mechanically rather than heuristically.
-
-Many self hosted agent systems adopt a structured output format for tool invocation often JSON. For example
+Many self-hosted agent systems adopt structured output formats for tool invocation, often JSON.
 
 ```json
 {"tool":"CLI_ls","args":{"path":"/var/log"}}
 ```
 
-This structure is intentional. It creates a well defined region of the output where action selection occurs. When the model begins emitting the tool field you know exactly which tokens correspond to the action choice. This makes it possible to intervene during decoding and restrict which tool names are valid continuations.
+This structure is intentional. It creates a well-defined region of the output where action selection occurs. When the model begins emitting the tool field, you know exactly which tokens correspond to the action choice. This makes it possible to intervene during decoding and restrict which tool names are valid continuations.
 
-The enforcement does not rely on the model understanding instructions such as do not use a particular tool. It relies on controlling the decoder itself. Below is a simplified illustration using a Hugging Face style logits processor. The goal is to restrict tool selection so that only a predefined set of tool names can be generated once the tool field has begun.
+Below is a simplified illustration using a Hugging Face style logits processor. The goal is to restrict tool selection so that only a predefined set of tool names can be generated once the tool field has begun.
 
 ```python
 import torch
@@ -480,91 +349,99 @@ class AllowedToolNameProcessor(LogitsProcessor):
         return scores
 ```
 
-Several clarifications are important. This example is conceptual and not production ready. Real tool names tokenize into multiple tokens. Production systems typically combine grammar constraints token prefix tries and logits processors. The core idea remains unchanged. Illegal continuations are removed from the token distribution before sampling. Once removed they cannot be selected.
+This example is conceptual rather than production-ready. Real tool names tokenize into multiple tokens. Production systems typically combine grammar constraints, token prefix tries, and logits processors. The core idea remains unchanged. Illegal continuations are removed from the token distribution before sampling. Once removed, they cannot be selected.
 
-Earlier sections discussed grouping tools by prefix such as CLI MATH or BILLING and restricting which groups are valid at a given step. Logit level masking is the natural extension of that idea in self hosted systems. At each step the agent’s capabilities remain unchanged since the full tool set exists. The agent’s legal action space is reduced by masking. That reduction is enforced mechanically at decode time. This mirrors action masking in reinforcement learning. The policy network knows about all actions but only a subset is legal in the current state.
+Logit-level masking does not interfere with prompt caching. Prompt caching operates on input tokens that form the prompt prefix. Logit-level masking operates on the output distribution during decoding. These mechanisms are orthogonal.
 
-It's worth noting that logit level masking does not interfere with prompt caching. Prompt caching operates on the input tokens that form the prompt prefix. Logit level masking operates on the output distribution during decoding. These mechanisms are orthogonal. 
+### When to Use Logit-Level Masking
 
-### When logit level masking is justified
-
-Logit level masking introduces additional decoding complexity and engineering overhead. It is typically justified when tool misuse is costly or dangerous when executor stages must be strictly controlled or when determinism and reproducibility matter more than flexibility. For many teams API level constraints such as allowed tools are sufficient. For teams operating self hosted models with tight safety or correctness requirements logit level constraints become a natural next step.
-
+Logit-level masking introduces decoding complexity and engineering overhead. It is typically justified when tool misuse is costly or dangerous, when executor stages must be strictly controlled, or when determinism and reproducibility matter more than flexibility. For many teams, API-level constraints are sufficient. For teams operating self-hosted models with tight safety or correctness requirements, logit-level constraints become a natural next step.
 
 
 ## Diagnosing Cache Failures
 
-If `cached_tokens` is 0 when hits are expected, the usual causes are:
+If `cached_tokens` is zero when hits are expected, the usual causes fall into five categories.
 
-1. The prompt is under 1,024 tokens (ineligible for caching).
-2. Prefix drift: timestamps, IDs, flags, ordering changes, or serialization changes.
-3. Tools differ between requests (order, fields, or formatting).
-4. Cache eviction due to inactivity (in memory retention).
-5. Hotspot behavior: a single prefix and key combination receiving very high query volume can reduce effectiveness.
+**Prompt too short.** The prompt is under 1,024 tokens and therefore ineligible for caching.
 
-The practical debugging method is to treat the prompt as a binary artifact: store the exact strings for step 1 and step 2 and diff them. If the diff shows edits near the top, the cache metrics will reflect that.
+**Prefix drift.** Timestamps, IDs, flags, ordering changes, or serialization changes have contaminated the prefix.
+
+**Tool differences.** Tools differ between requests in order, fields, or formatting.
+
+**Cache eviction.** Long pauses between steps have caused cached prefixes to be evicted due to in-memory retention limits.
+
+**Hotspot behavior.** A single prefix and key combination receiving very high query volume can reduce effectiveness.
+
+The practical debugging method is to treat the prompt as a binary artifact. Store the exact strings for step one and step two, then diff them. If the diff shows edits near the top, the cache metrics will reflect that.
 
 
-## Production Considerations
+## Production Checklist
 
 ### Required Practices
 
-1. **Freeze the prefix.** Do not place volatile fields near the beginning of the prompt.
-2. **Make tool schemas deterministic.** Ensure stable ordering, stable serialization, and versioned changes.
-3. **Instrument cache metrics.** Log `cached_tokens`, `prompt_tokens`, and time to first token; alert on unexpected drops.
-4. **Mask without mutation.** Keep the tools list stable and restrict tool calls via `allowed_tools`.
+**Freeze the prefix.** Do not place volatile fields near the beginning of the prompt.
+
+**Make tool schemas deterministic.** Ensure stable ordering, stable serialization, and versioned changes.
+
+**Instrument cache metrics.** Log `cached_tokens`, `prompt_tokens`, and time to first token. Alert on unexpected drops.
+
+**Mask without mutation.** Keep the tools list stable and restrict tool calls via `allowed_tools`.
 
 ### Optional Optimizations
 
-* Use `prompt_cache_key` for routing affinity when multiple tenants or workflows share infrastructure.
-* Enable extended retention (`24h`) when supported and warranted by workload characteristics (e.g., bursty or paused workflows).
+Use `prompt_cache_key` for routing affinity when multiple tenants or workflows share infrastructure.
 
-### Summary of Key Thresholds
+Enable extended retention when supported and warranted by workload characteristics such as bursty or paused workflows.
 
-* Caching activates at 1,024 tokens and grows in 128 token increments.
-* Cache hits require exact prefix matches.
-* In memory retention is time limited; extended retention stabilizes workflows with variable request timing.
+### Key Thresholds
+
+Caching activates at 1,024 tokens and grows in 128-token increments.
+
+Cache hits require exact prefix matches.
+
+In-memory retention is time-limited. Extended retention stabilizes workflows with variable request timing.
 
 
-## Appendix A: Worked Example (SomeRandomCompanySupport)
+## Appendix A. Worked Example
 
-This appendix demonstrates a single agent resolving one ticket in three steps. The precise token counts are illustrative; the qualitative pattern is the focus.
+This appendix demonstrates a single agent resolving one ticket in three steps. The precise token counts are illustrative. The qualitative pattern is the focus.
 
-Assumptions:
+**Assumptions**
 
-* Stable prefix (system instructions, policies, tools): approximately 2,200 tokens
-* Each step appends approximately 200 to 600 tokens
+The stable prefix, consisting of system instructions, policies, and tools, is approximately 2,200 tokens.
 
-### Step 1: Initial Request (Cold Cache)
+Each step appends approximately 200 to 600 tokens.
 
-**Stable prefix** (unchanged across steps):
+### Step 1. Initial Request with Cold Cache
+
+**Stable prefix** unchanged across steps
 
 ```
 [SYSTEM] You are SomeRandomCompanySupport, a customer support agent...
 [POLICY] Verify identity, be concise, never leak private data...
-[TOOLS] (all tool schemas, canonical order)
+[TOOLS] all tool schemas in canonical order
 ```
 
-**Append only context** (minimal on step 1):
+**Append-only context** minimal on step one
 
 ```
 [CONTEXT]
-Ticket metadata: customer_id=..., plan=Pro, region=EU
-Conversation history:
-  user: "I was charged twice for order #A123"
+Ticket metadata with customer_id, plan Pro, region EU
+Conversation history
+  user says "I was charged twice for order #A123"
 ```
 
-**Delta**:
+**Delta**
 
 ```
 [DELTA]
-Allowed tool groups now: BILLING_
-Goal: Determine whether duplicate charge occurred and fix it.
+Allowed tool groups now consist of BILLING_
+Goal is to determine whether duplicate charge occurred and fix it.
 ```
 
-**Expected caching behavior**: First request is cold, so `cached_tokens ≈ 0`. This request primes the prefix for subsequent steps.
+**Expected caching behavior.** First request is cold so cached_tokens equals approximately zero. This request primes the prefix for subsequent steps.
 
-**Illustrative usage**:
+**Illustrative usage**
 
 ```json
 {
@@ -574,44 +451,37 @@ Goal: Determine whether duplicate charge occurred and fix it.
 }
 ```
 
+### Step 2. Tool Result Appended with Cache Activated
 
-### Step 2: Tool Result Appended (Cache Activated)
+Assume step one triggered a tool call to `BILLING_lookup_invoice` with order_id A123.
 
-Assume step 1 triggered a tool call: `BILLING_lookup_invoice(order_id="A123")`.
+**Stable prefix** identical to step one
 
-**Stable prefix** (identical to step 1):
-
-```
-[SYSTEM] ...
-[POLICY] ...
-[TOOLS] ...
-```
-
-**Append only context** (tool call and output appended):
+**Append-only context** now includes tool call and output
 
 ```
 [CONTEXT]
-Ticket metadata: ...
-Conversation history:
-  user: "I was charged twice for order #A123"
+Ticket metadata...
+Conversation history
+  user says "I was charged twice for order #A123"
 
-Tool calls so far:
-  assistant -> BILLING_lookup_invoice(order_id="A123")
-Tool output:
-  invoice shows two charges: CHG_001 and CHG_002, same amount, 2 minutes apart
+Tool calls so far
+  assistant called BILLING_lookup_invoice with order_id A123
+Tool output
+  invoice shows two charges CHG_001 and CHG_002, same amount, 2 minutes apart
 ```
 
-**Delta**:
+**Delta**
 
 ```
 [DELTA]
-Allowed tool groups now: BILLING_
-Goal: Determine whether one charge is pending/voided versus settled; prepare refund if needed.
+Allowed tool groups now consist of BILLING_
+Goal is to determine whether one charge is pending or voided versus settled and prepare refund if needed.
 ```
 
-**Expected caching behavior**: A large portion of step 1 should now be cached, because step 2 is step 1 plus appended text.
+**Expected caching behavior.** A large portion of step one should now be cached because step two is step one plus appended text.
 
-**Illustrative usage**:
+**Illustrative usage**
 
 ```json
 {
@@ -621,48 +491,41 @@ Goal: Determine whether one charge is pending/voided versus settled; prepare ref
 }
 ```
 
+### Step 3. Refund Action and Finalization
 
-### Step 3: Refund Action and Finalization
+Assume step two decided to refund the duplicate charge using `BILLING_initiate_refund`.
 
-Assume step 2 decided to refund the duplicate charge using `BILLING_initiate_refund`.
+**Stable prefix** identical
 
-**Stable prefix** (identical):
-
-```
-[SYSTEM] ...
-[POLICY] ...
-[TOOLS] ...
-```
-
-**Append only context**:
+**Append-only context**
 
 ```
 [CONTEXT]
-Ticket metadata: ...
-Conversation history:
-  user: "I was charged twice for order #A123"
+Ticket metadata...
+Conversation history
+  user says "I was charged twice for order #A123"
 
-Tool calls so far:
-  assistant -> BILLING_lookup_invoice(...)
-Tool output:
+Tool calls so far
+  assistant called BILLING_lookup_invoice...
+Tool output
   two charges confirmed
 
-  assistant -> BILLING_initiate_refund(charge_id="CHG_002", reason="Duplicate charge")
-Tool output:
-  refund initiated: RFND_8891, ETA 3 to 5 business days
+  assistant called BILLING_initiate_refund with charge_id CHG_002 and reason Duplicate charge
+Tool output
+  refund initiated with id RFND_8891 and ETA 3 to 5 business days
 ```
 
-**Delta**:
+**Delta**
 
 ```
 [DELTA]
-Allowed tool groups now: GREETING_, BILLING_
-Goal: Explain resolution, include ETA, ask if anything else is needed.
+Allowed tool groups now consist of GREETING_ and BILLING_
+Goal is to explain resolution, include ETA, ask if anything else is needed.
 ```
 
-**Expected caching behavior**: Step 2 should be a prefix of step 3, so cached tokens typically increase again.
+**Expected caching behavior.** Step two should be a prefix of step three so cached tokens typically increase again.
 
-**Illustrative usage**:
+**Illustrative usage**
 
 ```json
 {
@@ -672,90 +535,64 @@ Goal: Explain resolution, include ETA, ask if anything else is needed.
 }
 ```
 
+**What to look for.** Cached tokens should grow roughly monotonically across steps. Small fluctuations are normal because caching operates in 128-token increments and can be affected by routing. But if you see frequent drops to zero, something in your prefix is changing.
 
-## Appendix B: Common Failure Modes
 
-This section documents the failure modes that most frequently produce the outcome "we enabled caching, but observed no benefit."
+## Appendix B. Quick Reference for Failure Modes
 
-### B.1 Volatile Fields at the Beginning of the Prompt
+### Volatile Fields in Prefix
 
-**Incorrect**:
-
-```python
-# Timestamp before the stable prefix
-prompt = f"now={now_iso}\n" + STATIC_PREFIX + f"\nuser={user_msg}"
-```
-
-**Why it fails**: The first tokens change on every request, so the prefix never matches exactly.
-
-**Observed behavior**: Every step appears cold.
-
-```json
-{ "prompt_tokens": 3200, "prompt_tokens_details": { "cached_tokens": 0 } }
-```
-
-**Solution**: Move volatile fields to the end.
+Wrong
 
 ```python
-# Timestamp at the end
-prompt = STATIC_PREFIX + f"\nuser={user_msg}\nnow={now_iso}"
+prompt = f"now={now_iso}\n" + STATIC_PREFIX + user_msg
 ```
 
-### B.2 Nondeterministic Tool Ordering
-
-**Incorrect**:
+Right
 
 ```python
-# Tool order depends on database return order
+prompt = STATIC_PREFIX + user_msg + f"\nnow={now_iso}"
+```
+
+### Nondeterministic Tool Ordering
+
+Wrong
+
+```python
 tools = fetch_tools_from_db()
 ```
 
-**Why it fails**: Tools appear early in the prompt and are typically large; reordering them changes the prefix significantly.
-
-**Solution**:
+Right
 
 ```python
 tools = sorted(fetch_tools_from_db(), key=lambda t: t["name"])
 ```
 
-### B.3 Schema Serialization Drift
+### Serialization Drift
 
-**Incorrect**:
+Wrong
 
 ```python
-# Noncaonical serialization
 tools_json = json.dumps(tools, indent=2)
 ```
 
-Or:
+Right
 
 ```python
-# Dynamic metadata inside schemas
-tool["last_updated_at"] = datetime.utcnow().isoformat()
+def canonical_json(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ";"))
 ```
 
-**Why it fails**: Token streams differ even when schemas are semantically equivalent.
+### Dynamic Tool Removal
 
-**Solution**:
-
-```python
-def canonical_json(obj) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
-```
-
-Additionally, remove dynamic metadata from any cacheable prefix. Version schemas intentionally when changes are necessary.
-
-### B.4 Dynamic Tool Removal
-
-**Incorrect**:
+Wrong
 
 ```python
-# Changing the tools list changes the prefix
 available = [t for t in ALL_TOOLS if is_available(t)]
 resp = client.responses.create(tools=available, ...)
 ```
 
-**Solution**: Keep the tools list stable and gate tool calls via `allowed_tools`.
+Right
 
 ```python
 resp = client.responses.create(
@@ -769,8 +606,8 @@ resp = client.responses.create(
 )
 ```
 
-### B.5 Rewriting Context Instead of Appending
+### Rewriting Context Instead of Appending
 
-**Why it fails**: If you reorder, reformat, or summarize earlier content in place, you change the prefix token stream. Step N is no longer a prefix extension of step N−1.
+If you reorder, reformat, or summarize earlier content in place, you change the prefix token stream. Step N is no longer a prefix extension of step N-1.
 
-**Recommended approach**: Append new turns and tool outputs. If summarization is required, append a summary block rather than rewriting earlier text, unless cache invalidation is acceptable.
+Append new turns and tool outputs. If summarization is required, append a summary block rather than rewriting earlier text, unless cache invalidation is acceptable.
