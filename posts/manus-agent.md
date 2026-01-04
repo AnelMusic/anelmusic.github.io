@@ -783,4 +783,4 @@ This methodology transforms agent engineering from demonstration-driven developm
 
 The gap between fragile agent prototypes and Manus-class systems is largely explained by differences in runtime design and operational discipline. Typed state, externalized memory, constrained action formats, explicit control planes, deterministic replay, and retrieval as a controlled injection layer are feasible with open tooling.
 
-The primary challenge is not discovering new prompting strategies; it is implementing the constraints and development practices that make long-horizon behavior reliable, reproducible, and maintainable under real workloads.:
+The primary challenge is not discovering new prompting strategies but implementing the constraints and development practices that make long-horizon behavior reliable, reproducible, and maintainable under real workloads.
