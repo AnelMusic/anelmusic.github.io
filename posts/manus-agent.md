@@ -1,4 +1,4 @@
-# Reverse-Engineering Manus AI (kind of): 
+# Reverse-Engineering Manus AI (kind of) 
 ### Why some teams ship Manus-class systems and others don't
 
 The current "AI agent" landscape shows a severe engineering capability discrepancy. Some teams struggle to deliver systems that remain robust outside controlled demonstrations, while others ship agents that reliably plan, use tools, recover from errors, maintain long-horizon state, and generate consistent artifacts.
