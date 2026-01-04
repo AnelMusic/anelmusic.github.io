@@ -233,9 +233,9 @@ This is deliberately plain as reliability typically comes from unambiguous contr
 
 
 
-## 8. Scaling out: task decomposition without the "multi-agent" hype
+## 8. Scaling out: Task decomposition 
 
-When tasks become "wide"—many sources to consult, many subtasks to complete—quality often degrades. The problem is typically context dilution/polution rather than reasoning limitations. A single agent juggling research, implementation, and verification in one context window loses coherence as the prompt grows.
+When tasks become "wide" with many sources to consult, many subtasks to complete, quality often degrades. The problem is typically context dilution/polution rather than reasoning limitations. A single agent juggling research, implementation, and verification in one context window loses coherence as the prompt grows.
 
 The architectural response is decomposition. Crucially, this does not require new abstractions. The same primitives from Sections 4–7 apply recursively:
 
@@ -491,7 +491,7 @@ docker exec -it agent-sandbox bash -c "\
   playwright install chromium"
 ```
 
-(Additional hardening—capabilities dropping, seccomp, egress controls—should be treated as production requirements, but is orthogonal to the architectural logic in this post.)
+(Additional hardening—capabilities dropping, seccomp, egress controls should be treated as production requirements, but is orthogonal to the architectural logic in this post.)
 
 
 
