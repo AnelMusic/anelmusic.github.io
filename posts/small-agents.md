@@ -1,38 +1,27 @@
-There is a particular feeling you get when you first wire a small language model into tools. The model is only 7B or 8B parameters, maybe running locally, maybe cheap enough to call all day, and yet it suddenly starts doing things that used to feel reserved for much larger systems. It emits JSON. It calls APIs. It searches. It reads files. It writes code. It summarizes tool outputs and decides what to do next. For a few minutes it feels like you have crossed a threshold. You did not just build a chatbot. You built an agent.
+# Frontier Agent Harness Doesn't Scale Down
+## Your 8B isn't a frontier model - stop harnessing it like one
 
-Then you let it run longer.
+There is a particular feeling you get when you first wire a small language model into tools. The model is "only" 7B or 8B parameters large, maybe running locally, maybe cheap enough to call all day, and yet it suddenly starts doing things that used to feel reserved for much larger systems. It emits JSON. It calls APIs. It searches. It reads files. It writes code. It summarizes tool outputs and decides what to do next. Feels like you have crossed a threshold. You built an agent. Then, as engineers do, you challange it let it run longer.
 
-That is usually where the illusion starts to crack. Not immediately, and not in a way that looks obviously stupid. The model does not collapse into nonsense. In fact, the strange part is that many individual steps still look good. It calls the right tool. It gives a reasonable explanation. It chooses a plausible next action. But after enough steps, something subtle happens: the system is no longer quite pursuing the same goal. It has drifted. A constraint from earlier has become less important. A subtask has become the main task. A partial result has been mistaken for completion. The model is still producing locally sensible behavior, but the trajectory as a whole has lost the plot.
+That is usually where the illusion starts to crack. Not immediately, and not in a way that looks obviously stupid. The model does not collapse into nonsense. In fact, the strange part is that many individual steps still look good. It calls the right tool. It gives a reasonable explanation. It chooses a plausible next action. But after enough steps, something subtle happens where the agent is no longer quite pursuing the same goal. It has drifted. A constraint from earlier has become less important. A subtask has become the main task. A partial result has been mistaken for completion. The model is still producing locally sensible behavior, but the trajectory as a whole has lost the plot. This is, in my opinion, the central fact about small model agents. The difficult part is not tool use. By now too use is trainable, measurable, and scaffoldable. The difficult part is **continuity** so the hard question becomes whether your model can still be doing the same task forty steps later.
 
-This is, in my opinion, the central fact about small model agents. The difficult part is not tool use. Tool use is increasingly trainable, measurable, and scaffoldable. The difficult part is **continuity**. The hard question is not whether the model can do the next step. The hard question is whether it can still be doing the same task forty steps later.
+By now, the agent harness community has converged to same intuition. Give the model tools, minimal complete context, smart memory management, and get out of its way. Over-engineered pipelines and complicated scaffolding hurt performance or at least add latency. Simplicity won. The problem is we learned that lesson on frontier models, and we're applying it everywhere. With small models, you can't get out of the way. You have to take them by the hand because small models are good at robustly producing local plausibility but agent needs long-horizon trajectory correctness and closing the gap between them is the whole engineering problem.
 
-Every technique in this post is an answer to that one question.
+Every technique in this post tries to adress how to do that.
 
-The model is producing local plausibility. The system needs trajectory correctness. These are not the same thing, and closing the gap between them is the whole engineering problem.
+## Tool Use Is Not Agency (oviously)
 
+Again, tool use is a local skill and agency is a global property.
 
-## Tool Use Is Not Agency
+A small model can learn that a weather question should call a weather API. It can learn that a tool call must follow a particular schema. It can learn to read tool output and summarize it. These are impressive capabilities, but they are still short-horizon mappings. Agency is not like that. Agency means preserving an objective over time. It means knowing what has already happened, what remains undone, which constraints are hard, which facts are verified versus assumed, and when the current plan needs to be revised versus when it needs to be abandoned entirely. This is where small models struggle.
 
-Tool use is a local skill. Agency is a global property.
-
-A small model can learn that a weather question should call a weather API. It can learn that a tool call must follow a particular schema. It can learn to read tool output and summarize it. These are impressive capabilities, but they are still short-horizon mappings: given this input, produce that structured output.
-
-Agency is not like that. Agency means preserving an objective over time. It means knowing what has already happened, what remains undone, which constraints are hard, which facts are verified versus assumed, and when the current plan needs to be revised versus when it needs to be abandoned entirely.
-
-This is where small models struggle. They are often surprisingly good at “what should happen next?” but much worse at “what invariant must remain true across the whole trajectory?” The first problem looks like language modeling. The second looks like operating a fragile stateful system where the failure pressure comes from the model’s own tendency toward local plausibility.
-
-A simple example captures everything. The user says: “Research five vendors, compare them on cost and reliability, but do not recommend one until all five have been evaluated.” A small model might evaluate two vendors and then write: “Based on this comparison, Vendor B seems like the strongest option.” This answer is not random. It is exactly the kind of sentence that follows a comparison. Locally, it is perfect. Globally, it is wrong.
-
-That is the trap. Many agent failures are not failures of plausibility. They are **caused** by plausibility.
+A simple example captures everything. The user says: “Research five vendors, compare them on cost and reliability, but do not recommend one until all five have been evaluated.” A small model might evaluate two vendors and then write: “Based on this comparison, Vendor B seems like the strongest option.” This answer is not random. It is exactly the kind of sentence that follows a comparison. Locally, it is spot on, globally, it is wrong. That is the trap. Many agent failures are not failures of plausibility. They are **caused** by plausibility.
 
 The model produces behavior that looks right at the sentence level, because looking right at the sentence level is what it was trained to do. The objective, the constraint, and the plan are not properties of the next sentence. They are properties of the system. And if the system does not hold them, no one will.
 
+## The First Move: Make The State Real
 
-## The First Move: Make State Real
-
-The most important trick is almost embarrassingly simple. Stop treating the conversation transcript as memory.
-
-Conversation history is not state. It is a lossy event log full of stale plans, failed attempts, outdated assumptions, and irrelevant phrasing. Buried in it is the true state of the task but asking a small model to reconstruct that state from scratch on every step is both wasteful and unreliable. Each reconstruction is a new chance for drift.
+One technique is almost embarrassingly simple. Stop treating the conversation transcript as memory. Conversation history is not state. It is a lossy event log full of stale plans, failed attempts (at least if you follow Manues AIs harness philosophy), outdated assumptions, and irrelevant phrasing. Buried in it is the true state of the task but asking a small model to reconstruct that state from scratch on every step is both wasteful and unreliable. Each reconstruction is a new chance for drift.
 
 So externalize the state. Make it an object. Make it explicit. And make it complete including failure memory, which we’ll need shortly.
 
@@ -70,11 +59,11 @@ class AgentState(BaseModel):
     can_finish: bool = False
 ```
 
-`failed_attempts` is a flat log of rejected actions including structural failures, rejected finishes, loop detections. `failed_strategies` is higher-level: the conceptual approaches that were tried and abandoned. Both matter, and keeping them separate is worth the extra field.
+`failed_attempts` is a flat log of rejected actions including structural failures, rejected finishes, loop detections. `failed_strategies` is higher-level: the conceptual approaches that were tried and abandoned. Often both matter, and keeping them separate is worth the extra field.
 
-One note on `plan` and `completed_steps`: both use plain strings here for readability. In production systems this is brittle — string matching between plan labels and completed step labels fails the moment anyone rephrases a step. Production agents usually assign each step a stable ID and match on that. The structure below is correct in spirit; just swap strings for IDs before shipping.
+One note on `plan` and `completed_steps`: both use plain strings here for readability. In production systems this is brittle because string matching between plan labels and completed step labels fails the moment anyone rephrases a step. Production agents usually assign each step a stable ID and match on that. The structure below is correct in spirit, just swap strings for IDs before shipping.
 
-This one object changes the psychology of the system. The model is no longer asked to infer everything from a long scroll of prior messages. It is asked: “Given this clean state, what is the next valid move?” That is a much easier problem. It is also a problem that does not compound drift, each call starts from an accurate description of where things actually stand, not from whatever the model happened to emphasize in its last summary.
+This one object changes the psychology of the system. The model is no longer asked to infer everything from a long scroll of prior messages. It is asked: “Given this clean state, what is the next valid move?” That is a much easier problem. It is also a problem that usually does not compound drift, as each call starts from an accurate description of where things actually stand, not from whatever the model happened to emphasize in its last summary.
 
 The state object is also the place where drift becomes visible. If your `hard_constraints` list is empty when it should have three items, you can see that. If `can_finish` is true when two plan steps are unresolved, you can catch it. Drift that lives in a conversation transcript is invisible. Drift that lives in a typed object throws a validation error.
 
@@ -89,7 +78,7 @@ messages.append(model_thought)
 messages.append(next_prompt)
 ```
 
-This feels natural. It is also how you produce context sludge. Small models degrade badly when the instructions they need are buried under old traces, half-finished thoughts, and redundant summaries. The important things get diluted. The model attends to what is recent and verbose, not to what is structurally significant.
+This feels natural. It is also how you produce context sludge. Small models degrade badly when the instructions they need are buried under old traces, half-finished thoughts, and redundant summaries. The important things get diluted. The model attends to what is recent and verbose (use it to bias the model), not to what is structurally significant.
 
 Instead, compile a fresh context for each call from the current state:
 
@@ -124,9 +113,7 @@ RULES:
 """
 ```
 
-Notice what is happening here. The prompt is not a giant constitution. It is a compiled working set derived from state. Every call sees the facts that matter right now, in a known position, without old conversation competing for attention.
-
-This matters more than it sounds. A small model reading a compiled prompt is being asked to reason over a clean structured summary. A small model reading an appended transcript is being asked to reconstruct that same summary first, and then reason over it. The second task is strictly harder and introduces a compounding source of error.
+Notice what is happening here. The prompt is not a giant constitution. It is a compiled working set derived from state. Every call sees the facts that matter right now, in a known position, without old conversation competing for attention. This matters more than it sounds. A small model reading a compiled prompt is being asked to reason over a clean structured summary. A small model reading an appended transcript is being asked to reconstruct that same summary first, and then reason over it. The second task is strictly harder and introduces a compounding source of error.
 
 
 ## Nags That Come From State
@@ -172,16 +159,14 @@ Return one action:
 """
 ```
 
-The placement matters. Injection near the end of the prompt exploits recency. The model reads the nag block last, immediately before it generates the action. It cannot have forgotten it yet.
-
-This is salience engineering. You are not hoping the model remembers what matters. You are making what matters structurally impossible to miss, at exactly the moment the model has to decide.
+Research clearly shows that the placement matters. Injection near the end of the prompt exploits recency. The model reads the nag block last, immediately before it generates the action. It cannot have forgotten it yet. This is salience engineering. Do not hope that the model remembers what matters. Make it structurally (almost) impossible to miss, at exactly the moment the model has to decide.
 
 
 ## Fewer Moves, Better Choices
 
 Small models are much better when the action space is small. This sounds obvious, but its implications run deeper than “use fewer tools.”
 
-The failure mode is not usually that the model picks an obviously wrong tool. It is that the model picks a *plausible but premature* tool, trying to write the final answer before all inputs are gathered, or calls an API before validating the parameters. These mistakes are not random. They are the result of a wide action space with many locally attractive options.
+The failure mode is not usually that the model picks an obviously wrong tool. It is that the model picks a *plausible but premature* tool, trying to write the final answer before all inputs are gathered, or calls an API before validating the parameters. These mistakes are the result of a wide action space with many locally attractive options.
 
 So constrain the action space at runtime:
 
