@@ -1,5 +1,3 @@
-# The Real Shape of Small Model Agents
-
 There is a particular feeling you get when you first wire a small language model into tools. The model is only 7B or 8B parameters, maybe running locally, maybe cheap enough to call all day, and yet it suddenly starts doing things that used to feel reserved for much larger systems. It emits JSON. It calls APIs. It searches. It reads files. It writes code. It summarizes tool outputs and decides what to do next. For a few minutes it feels like you have crossed a threshold. You did not just build a chatbot. You built an agent.
 
 Then you let it run longer.
@@ -12,7 +10,6 @@ Every technique in this post is an answer to that one question.
 
 The model is producing local plausibility. The system needs trajectory correctness. These are not the same thing, and closing the gap between them is the whole engineering problem.
 
------
 
 ## Tool Use Is Not Agency
 
@@ -30,7 +27,6 @@ That is the trap. Many agent failures are not failures of plausibility. They are
 
 The model produces behavior that looks right at the sentence level, because looking right at the sentence level is what it was trained to do. The objective, the constraint, and the plan are not properties of the next sentence. They are properties of the system. And if the system does not hold them, no one will.
 
------
 
 ## The First Move: Make State Real
 
@@ -82,7 +78,6 @@ This one object changes the psychology of the system. The model is no longer ask
 
 The state object is also the place where drift becomes visible. If your `hard_constraints` list is empty when it should have three items, you can see that. If `can_finish` is true when two plan steps are unresolved, you can catch it. Drift that lives in a conversation transcript is invisible. Drift that lives in a typed object throws a validation error.
 
------
 
 ## Compile Context, Don’t Append It
 
@@ -133,7 +128,6 @@ Notice what is happening here. The prompt is not a giant constitution. It is a c
 
 This matters more than it sounds. A small model reading a compiled prompt is being asked to reason over a clean structured summary. A small model reading an appended transcript is being asked to reconstruct that same summary first, and then reason over it. The second task is strictly harder and introduces a compounding source of error.
 
------
 
 ## Nags That Come From State
 
@@ -182,7 +176,6 @@ The placement matters. Injection near the end of the prompt exploits recency. Th
 
 This is salience engineering. You are not hoping the model remembers what matters. You are making what matters structurally impossible to miss, at exactly the moment the model has to decide.
 
------
 
 ## Fewer Moves, Better Choices
 
@@ -218,7 +211,6 @@ This is not dumbing the model down. It is reducing entropy at the decision point
 
 There is a deeper principle here. The model is not being trusted to know what is appropriate. The controller knows that, and expresses it through the allowed action list. The model is being asked only to choose the best action from the appropriate set. Separate what-is-appropriate from which-is-best, and handle the first question in code.
 
------
 
 ## The Memory of Failure
 
@@ -315,7 +307,6 @@ Budget exhaustion should route to `ASK_USER` with a specific question about the 
 
 The pattern across all four levels is the same: detect unproductive repetition, write it into state, and use it to constrain the next action. The model does not have to notice it is stuck. The system tells it.
 
------
 
 ## The Completion Gate
 
@@ -355,7 +346,6 @@ def handle_finish_attempt(state: AgentState):
 
 This gate is not catching hallucinations. It is catching the model’s structural tendency to close things. That tendency is useful in conversation because you want models to conclude thoughts. In multi-step agents, it is a bug. The gate re-routes it.
 
------
 
 ## Separate Planning From Acting
 
@@ -409,7 +399,6 @@ Stage the workflow:
 
 The model never touches the side-effect tool directly. It produces a draft. A human or a gate decides whether to fire it. This is not a prompt trick. It is a trust boundary, a structural fact about the system that no amount of context drift can override.
 
------
 
 ## Keeping Context Lean
 
@@ -458,7 +447,6 @@ def apply_observation(state: AgentState, obs: Observation):
 
 The structured observation is also where you force the model to make a commitment: what did this tool call actually establish? Forcing that commitment at observation time is better than letting the model’s interpretation of the raw result vary on each subsequent call.
 
------
 
 ## Facts, Assumptions, and Decisions Are Not The Same Thing
 
@@ -503,7 +491,6 @@ DECISIONS ALREADY MADE:
 
 This is not primarily a prompting technique. It is a forcing function. The model cannot blend facts and assumptions at conclusion time if the state object has already separated them. The conclusion must cite from one list or the other, and the lists are different types with different affordances.
 
------
 
 ## A Structured Scratchpad
 
@@ -524,7 +511,6 @@ The four fields are not arbitrary. `goal_check` forces the model to restate the 
 
 Thirty tokens. It is self-orientation, not reasoning. The scratchpad should not become another place where the model invents a new task.
 
------
 
 ## Verification Should Be Boring
 
@@ -565,7 +551,6 @@ def deterministic_verify(state: AgentState, action: dict) -> list[str]:
 
 The model-based verifier catches semantic violations. The deterministic check catches structural ones and costs nothing. Run the deterministic check first. Most rejections never need to reach the model.
 
------
 
 ## The Agent Card
 
@@ -585,7 +570,6 @@ class AgentCard(BaseModel):
 
 The card is not a history summary. It is the current working brief, updated as the task evolves. It replaces the transcript. It carries what matters forward without the noise of everything that was tried and discarded.
 
------
 
 ## What It Actually Looks Like
 
@@ -593,7 +577,6 @@ All of those mechanisms described above are easy to nod at in the abstract. Here
 
 The objective: research five cloud infrastructure vendors on cost and EU availability, but do not recommend one until all five have been evaluated.
 
------
 
 **Turn 1**
 
@@ -639,7 +622,6 @@ Observation stored:
 
 State updated. `completed_steps` now contains “Evaluate Vendor A”.
 
------
 
 **Turn 2**
 
@@ -651,7 +633,6 @@ Model proposes:
 
 Passes all checks. Executes. Vendor B facts stored. `completed_steps` now contains A and B.
 
------
 
 **Turn 3**
 
@@ -678,7 +659,6 @@ Attempted to finish early. Missing: Evaluate Vendor C | Evaluate Vendor D | Eval
 
 Model does not get to produce its recommendation. The gate re-routes it. Next turn, the nag block now includes: “You attempted to finish early. Three plan steps remain incomplete.”
 
------
 
 **Turn 4**
 
@@ -690,7 +670,6 @@ Model proposes:
 
 Passes. Executes. Vendor C facts stored.
 
------
 
 **Turn 5**
 
@@ -716,7 +695,6 @@ Loop detected: SEARCH repeated with identical arguments. Vendor B already evalua
 
 The model never gets to re-run the search. The system forces a different move.
 
------
 
 **Turn 6**
 
@@ -728,7 +706,6 @@ Model now proposes:
 
 State validator runs. No constraints removed, no completed steps lost, no unsourced high-confidence facts. Passes. Open question added.
 
------
 
 **Turn 7**
 
@@ -746,13 +723,11 @@ High-confidence fact lacks source: "Vendor C is the most cost-effective option."
 
 The model cannot store an unsourced comparative judgment as a verified high-confidence fact. It gets routed back with an error. On the next turn, it stores the fact correctly with `confidence: "low"` and `source: "inferred from pricing comparison"`.
 
------
 
 **Turns 8 and 9**
 
 Vendor D and Vendor E evaluated cleanly. No loops, no rejected finishes. All five plan steps now in `completed_steps`. Controller sets `can_finish: true`.
 
------
 
 **Turn 10**
 
@@ -773,7 +748,6 @@ can_finish: true
 
 Gate rejects because one open question remains unresolved. Written to `failed_attempts`.
 
------
 
 **Turn 11**
 
@@ -789,19 +763,16 @@ Instead, the controller moves the unresolved SLA question into a new `limitation
 
 The open question is cleared. Completion check re-runs. All conditions met. But the limitation is now part of state, which means it must appear in the final answer as explicit uncertainty. The model cannot bury it.
 
------
 
 **Turn 12**
 
 Model proposes FINISH. Gate accepts. Final answer produced using only `confidence: "high"` facts. The unsourced Vendor C judgment from Turn 7, stored as low-confidence, does not appear in the conclusion.
 
------
 
 Twelve turns. Five mechanisms fired: completion gate (twice), loop detector, state validator, open question block. The model never saw a raw rejection. Each time it was re-routed with a specific reason and a specific next move.
 
 The final answer is clean because the state is clean. Not because the model was careful.
 
------
 
 ## The Loop Itself Should Be Boring
 
@@ -868,7 +839,6 @@ That is not a small model failing to be a large model. That is a small model doi
 
 Larger models push the failure boundary outward. They can remember more, infer more, and recover from messier context for longer. But they do not remove the boundary. Eventually, even strong models benefit from the same boring machinery: explicit state, constrained actions, verification, failure memory, and clean control flow. Small models simply make the need for that machinery impossible to ignore.
 
------
 
 ## The Real Trick
 
