@@ -1,4 +1,4 @@
-## Your 8B isn't a frontier model - stop harnessing it like one
+#### Your 8B isn't a frontier model - stop harnessing it like one
 
 There is a particular feeling you get when you first wire a small language model into tools. The model is "only" 7B or 8B parameters large, maybe running locally, maybe cheap enough to call all day, and yet it suddenly starts doing things that used to feel reserved for much larger systems. It emits JSON. It calls APIs. It searches. It reads files. It writes code. It summarizes tool outputs and decides what to do next. Feels like you have crossed a threshold. You built an agent. Then, as engineers do, you challange it let it run longer.
 
