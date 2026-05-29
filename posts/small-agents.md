@@ -192,16 +192,12 @@ You must choose exactly one of these. Do not invent another action.
 """
 ```
 
-This is not dumbing the model down. It is reducing entropy at the decision point. The model does not choose from an infinite space. It chooses from a small set of appropriate options, all of which are appropriate to the current situation. That is a different cognitive task, and small models are much better at it.
-
-There is a deeper principle here. The model is not being trusted to know what is appropriate. The controller knows that, and expresses it through the allowed action list. The model is being asked only to choose the best action from the appropriate set. Separate what-is-appropriate from which-is-best, and handle the first question in code.
-
+This way the model does not choose from an infinite space but from a small set options, all of which are appropriate to the current situation. That is a different cognitive task, and small models are much better at it.
+Actually, there is a deeper principle here. The model is not being trusted to know what is appropriate. The controller knows that, and expresses it through the allowed action list. 
 
 ## The Memory of Failure
 
-Every form of drift I have described, including tool loops, strategy repetition, premature completion, and stagnation, shares the same root cause: the model has no persistent memory of what has already failed. Each turn it arrives fresh and locally plausible, with no structural weight attached to the things that have not worked.
-
-The fix is to make failure a first-class citizen of state, and to detect it at multiple levels of abstraction.
+Every form of drift I have described, including tool loops, strategy repetition, premature completion, and stagnation, shares the same root cause. The model has no persistent memory of what has already failed. Each turn it arrives fresh and locally plausible, with no structural weight attached to the things that have not worked. One potential fix is to make failure a first-class citizen of state, and to detect it at multiple levels of abstraction.
 
 **Level one: exact tool repetition.** The model calls the same search with the same arguments it used two turns ago. Hash the arguments and track it:
 
@@ -265,7 +261,7 @@ def update_progress_tracker(state: AgentState, tracker: ProgressTracker):
     tracker.last_score = score
 ```
 
-When stagnant for three turns, write to `failed_attempts` and inject into the nag block with a specific escalation path and not just “change strategy,” but exactly which alternatives are now appropriate:
+When stagnant for several turns, write to `failed_attempts` and inject into the nag block with a specific escalation path and not just “change strategy,” but exactly which alternatives are now appropriate:
 
 ```
 - No measurable progress for 3 turns.
@@ -290,14 +286,12 @@ def consume_retry(budget: RetryBudget, step: str) -> bool:
 
 Budget exhaustion should route to `ASK_USER` with a specific question about the stuck step and not a generic “I need help” but an honest “here is what I tried, here is where I am stuck.” An agent that escalates honestly when it is stuck is far more useful than one that either stops silently or retries indefinitely.
 
-The pattern across all four levels is the same: detect unproductive repetition, write it into state, and use it to constrain the next action. The model does not have to notice it is stuck. The system tells it.
+The pattern across all four levels is the same: detect unproductive repetition, write it into state, and use it to constrain the next action. The model does not have to notice it is stuck because the system tells it.
 
 
 ## The Completion Gate
 
-One of the most reliably embarrassing small-model failure modes: the agent writes a beautiful, confident final answer attached to incomplete work. It evaluated three vendors, not five. It drafted the email before getting user approval. It reported success on a step that was marked as failed two turns ago.
-
-The model is not lying. It is doing what it always does: producing the most locally plausible next token. A confident concluding statement is very plausible after a chain of analysis, even if the analysis is incomplete.
+One of the most reliably embarrassing small-model failure modes is when the agent writes a beautiful, confident final answer attached to incomplete work. It evaluated three vendors, not five. It drafted the email before getting user approval. It reported success on a step that was marked as failed two turns ago. Such a confident concluding statement is very plausible after a chain of analysis, even if the analysis is incomplete.
 
 Do not let the model decide when it is done. Let it propose finishing, then check the state:
 
@@ -329,14 +323,12 @@ def handle_finish_attempt(state: AgentState):
     return {"status": "accepted"}
 ```
 
-This gate is not catching hallucinations. It is catching the model’s structural tendency to close things. That tendency is useful in conversation because you want models to conclude thoughts. In multi-step agents, it is a bug. The gate re-routes it.
-
+This gate is catching the model’s structural tendency to close things. That tendency is useful in conversation because you want models to conclude thoughts. Unfortunately, in multi-step agents, it is more like a bug. 
 
 ## Separate Planning From Acting
 
-Small models get significantly safer when planning and execution are different modes. Not different prompts, with enforced tool constraints.
-
-In plan mode, no write tools. No side effects. No irreversible actions. The model can inspect, reason, and propose. Nothing it does has consequences.
+Small models get significantly safer when planning and execution are different modes and not just different prompts, with enforced tool constraints.
+In plan mode, no write tools are registered and we want to reduce, side effects and irreversible actions as much as possible. The model can inspect, reason, and propose. Nothing it does has consequences.
 
 ```python
 class Mode:
@@ -378,16 +370,16 @@ def validate_approval(state: AgentState, tool_name: str):
 Stage the workflow:
 
 ```
-# Bad:  model → SEND_EMAIL
-# Good: model → WRITE_DRAFT → user approval → controller → SEND_EMAIL
+# Bad:  model -> SEND_EMAIL
+# Good: model -> WRITE_DRAFT -> user approval -> controller -> SEND_EMAIL
 ```
 
-The model never touches the side-effect tool directly. It produces a draft. A human or a gate decides whether to fire it. This is not a prompt trick. It is a trust boundary, a structural fact about the system that no amount of context drift can override.
+The model never touches the side-effect tool directly. It produces a draft and a human or a gate decides whether to fire it. 
 
 
 ## Keeping Context Lean
 
-Tool outputs can be enormous. Raw API responses, full file contents, large search results, which blow up context fast. Small models get lost in them. The important facts are diluted. The model starts to summarize the summaries and loses track of the original signal.
+Tool outputs can be enormous. Raw API responses, full file contents, large search results, which blow up context fast. Small models get lost in them (even more than large ones). The important facts are diluted and the model starts to summarize the summaries and loses track of the original signal.
 
 After each tool call, compress the result into a structured observation:
 
@@ -474,7 +466,7 @@ DECISIONS ALREADY MADE:
 """
 ```
 
-This is not primarily a prompting technique. It is a forcing function. The model cannot blend facts and assumptions at conclusion time if the state object has already separated them. The conclusion must cite from one list or the other, and the lists are different types with different affordances.
+This way the model cannot blend facts and assumptions at conclusion time if the state object has already separated them. The conclusion must cite from one list or the other, and the lists are different types with different affordances.
 
 
 ## A Structured Scratchpad
@@ -492,10 +484,7 @@ Keep it short and structured:
 }
 ```
 
-The four fields are not arbitrary. `goal_check` forces the model to restate the objective, where premature completions get caught. `state_check` forces an accounting of what is done. `next_step` commits to a specific action before the action JSON. `risk` names the most likely failure mode before it happens.
-
-Thirty tokens. It is self-orientation, not reasoning. The scratchpad should not become another place where the model invents a new task.
-
+`goal_check` forces the model to restate the objective, where premature completions get caught. `state_check` forces an accounting of what is done. `next_step` commits to a specific action before the action JSON. `risk` names the most likely failure mode before it happens.
 
 ## Verification Should Be Boring
 
@@ -539,7 +528,7 @@ The model-based verifier catches semantic violations. The deterministic check ca
 
 ## The Agent Card
 
-Long conversations accumulate junk: old plans, relaxed constraints, buried preferences, failed attempts that should not be retried. Passing a long transcript and asking the model to infer the current brief is asking it to do exactly the kind of reconstruction that causes drift.
+Long conversations accumulate junk like old plans, relaxed constraints, buried preferences and failed attempts that should not be retried. Passing a long transcript and asking the model to infer the current brief is asking it to do exactly the kind of reconstruction that causes drift.
 
 Keep a card instead:
 
@@ -553,7 +542,7 @@ class AgentCard(BaseModel):
     last_user_preference: str | None = None
 ```
 
-The card is not a history summary. It is the current working brief, updated as the task evolves. It replaces the transcript. It carries what matters forward without the noise of everything that was tried and discarded.
+This way we try to utilize the current working brief that is updated as the task evolves. It carries what matters forward without the noise of everything that was tried and discarded.
 
 
 ## What It Actually Looks Like
@@ -825,32 +814,25 @@ That is not a small model failing to be a large model. That is a small model doi
 Larger models push the failure boundary outward. They can remember more, infer more, and recover from messier context for longer. But they do not remove the boundary. Eventually, even strong models benefit from the same boring machinery: explicit state, constrained actions, verification, failure memory, and clean control flow. Small models simply make the need for that machinery impossible to ignore.
 
 
-## The Real Trick
+## The Real Trick In A Nutshell
 
-Everything above is an instance of one principle.
+Everything above is an instance of one principle:
+**Move responsibility out of the model. Not because the model is bad, because the model is optimized for local plausibility, and local plausibility is not the same thing as trajectory correctness.**
 
-Move responsibility out of the model. Not because the model is bad, because the model is optimized for local plausibility, and local plausibility is not the same thing as trajectory correctness.
-
-Do not ask the model to remember the plan. Store the plan.
-
-Do not ask it to notice repeated tools. Count them.
-
-Do not ask it to know whether it is done. Check completion.
-
-Do not ask it to preserve constraints across thirty turns. Re-inject the active constraints every turn.
-
-Do not ask it to avoid side effects. Gate side effects.
-
-Do not ask it to recover from every error. Store failed strategies and route differently.
-
-Do not ask it to read a giant transcript. Compile a clean context.
-
-Do not ask it to distinguish facts from assumptions. Separate them in state.
+- Do not ask the model to remember the plan. Store the plan.
+- Do not ask it to notice repeated tools. Count them.
+- Do not ask it to know whether it is done. Check completion.
+- Do not ask it to preserve constraints across thirty turns. Re-inject the active constraints every turn.
+- Do not ask it to avoid side effects. Gate side effects.
+- Do not ask it to recover from every error. Store failed strategies and route differently.
+- Do not ask it to read a giant transcript. Compile a clean context.
+- Do not ask it to distinguish facts from assumptions. Separate them in state.
 
 The model is good at one local semantic decision. The system is built as a machine that repeatedly converts global messy reality into one local semantic decision. Each call is a short question with a small answer space, clean context, and no accumulated drift.
 
-That is most of the game. Not only bigger models. Not only better prompts. Not only longer contexts.
+That is most of the game. A boring loop around a clean state machine, with a small model doing the one thing it is reliably good at. Build that, and small models become far more useful than they look in naive agent loops.
 
-A boring loop around a clean state machine, with a small model doing the one thing it is reliably good at.
+### Final Note:
 
-Build that, and small models become far more useful than they look in naive agent loops.
+This field is new to all of us. Don't let it intimidate you, and don't let anyone's opinionated takes (including mine) pressure you into a particular shape. Try things yourself, see what others are doing, let it inspire you. There is no established playbook yet, and honestly, none of us really has a clue. We're all just figuring it out as we go.
+
